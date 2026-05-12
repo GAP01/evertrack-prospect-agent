@@ -16,8 +16,12 @@ from unittest.mock import MagicMock, call, patch
 # Importe le module pour acceder aux constantes sans declencher les appels
 from redacteur_outreach import llm_rewriter
 from redacteur_outreach.llm_rewriter import (
+    _build_allowed_link_tokens,
     _build_allowed_tokens,
+    _extract_emails,
     _extract_numeric_tokens,
+    _extract_phone_tokens,
+    _extract_urls,
     _summarize_context,
     _truncate_objet,
     rewrite,
@@ -120,6 +124,21 @@ def _make_mock_client(body_text: str, objet_text: str) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 class TestLLMRewriter(unittest.TestCase):
+    """
+    Tests du comportement core de rewrite() (API key, fallbacks, garde-fous).
+
+    load_style_example est patche a None dans setUp pour isoler ces tests du
+    contenu reel de style_examples/example_default.txt. Les tests dédies a
+    l'injection de style sont dans TestStyleInjection et gerent leur propre patch.
+    """
+
+    def setUp(self) -> None:
+        patcher = patch(
+            "redacteur_outreach.llm_rewriter.load_style_example",
+            return_value=None,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     # --- Test 1 : pas de cle API ---
 
@@ -406,6 +425,475 @@ class TestLLMRewriter(unittest.TestCase):
         # L'objet ne doit pas etre vide — le default est utilise
         self.assertGreater(len(result["objet"]), 0)
         self.assertIn("ACME", result["objet"])
+
+
+class TestStyleInjection(unittest.TestCase):
+    """
+    Verifie l'injection de l'exemple stylistique dans le user prompt
+    et le comportement du garde-fou hallucination vis-a-vis des chiffres
+    presents dans l'exemple mais absents du contexte/pitch/fallback.
+    """
+
+    # --- Test : exemple charge injecte dans le user prompt ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch("redacteur_outreach.llm_rewriter.load_style_example", return_value="exemple bidon")
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_system_prompt_contains_example_when_loaded(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """Quand load_style_example retourne un texte, le bloc STYLE_EXAMPLE
+        doit apparaitre dans le contenu passe a messages.create (Call 1)."""
+        mock_client = _make_mock_client(_make_clean_body_llm(), "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        rewrite(_make_body_fallback(), _make_context(), _make_pitch())
+
+        # Call 1 = index 0 dans call_args_list
+        first_call = mock_client.messages.create.call_args_list[0]
+        user_content = first_call.kwargs["messages"][0]["content"]
+        self.assertIn("<STYLE_EXAMPLE>", user_content)
+        self.assertIn("exemple bidon", user_content)
+
+    # --- Test : pas de bloc exemple si load_style_example retourne None ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch("redacteur_outreach.llm_rewriter.load_style_example", return_value=None)
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_system_prompt_no_example_block_when_none(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """Quand load_style_example retourne None, le bloc STYLE_EXAMPLE
+        ne doit pas apparaitre dans le user prompt (pas de 'None' non plus)."""
+        mock_client = _make_mock_client(_make_clean_body_llm(), "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        rewrite(_make_body_fallback(), _make_context(), _make_pitch())
+
+        first_call = mock_client.messages.create.call_args_list[0]
+        user_content = first_call.kwargs["messages"][0]["content"]
+        self.assertNotIn("<STYLE_EXAMPLE>", user_content)
+        self.assertNotIn("EXEMPLE DE STYLE", user_content)
+        # S'assure que la valeur litterale "None" n'est pas injectee
+        self.assertNotIn("None", user_content)
+
+    # --- Test : exemple vide ("") se comporte comme None ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch("redacteur_outreach.llm_rewriter.load_style_example", return_value="")
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_system_prompt_no_example_block_when_empty_string(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """Quand load_style_example retourne une chaine vide, le comportement
+        doit etre identique au cas None : pas de bloc STYLE_EXAMPLE."""
+        mock_client = _make_mock_client(_make_clean_body_llm(), "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        rewrite(_make_body_fallback(), _make_context(), _make_pitch())
+
+        first_call = mock_client.messages.create.call_args_list[0]
+        user_content = first_call.kwargs["messages"][0]["content"]
+        self.assertNotIn("<STYLE_EXAMPLE>", user_content)
+
+    # --- Test critique : un chiffre de l'exemple qui fuite declenche hallucination ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="notre taux de conversion est de 87%",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_hallucination_guard_triggers_on_example_number_leak(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        L'exemple contient '87' mais ce chiffre est absent du contexte, du
+        pitch et du body_fallback. Si le LLM le repete dans sa sortie, le
+        garde-fou hallucination doit se declencher et retourner le fallback.
+
+        C'est l'invariant fondamental de T3 : l'exemple ne pollue pas le set
+        de tokens autorises.
+        """
+        body_fallback = _make_body_fallback()
+        # Verifie que "87" n'est pas dans le contexte ni le pitch ni le fallback
+        context = _make_context(score_total=75.0)
+        pitch = _make_pitch()
+        allowed = _build_allowed_tokens(body_fallback, context, pitch)
+        self.assertNotIn("87", allowed, "87 ne doit pas etre dans le set autorise")
+
+        # Le LLM retourne un body qui contient "87" (fuite du chiffre de l'exemple)
+        body_leaked = (
+            "Bonjour Dupont,\n\n"
+            "Notre taux de conversion est de 87 pour cent. "
+            "EverTrack peut vous aider.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_leaked, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, context, pitch)
+
+        self.assertFalse(result["llm_used"])
+        self.assertEqual(result["reason"], "hallucination_detected")
+        self.assertEqual(result["body_md"], body_fallback)
+
+    # --- Test : chiffre de l'exemple present dans le contexte = OK (pas de double comptage) ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="notre taux de conversion est de 87%",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_number_in_both_example_and_context_not_flagged(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        Si un chiffre est AUSSI present dans le contexte (score_total=87), il
+        est dans le set autorise. Le LLM peut le reprendre sans declencher
+        le garde-fou — ce n'est pas une hallucination.
+        """
+        body_fallback = _make_body_fallback()
+        context = _make_context(score_total=87.0)  # 87 present dans le contexte
+        pitch = _make_pitch()
+        allowed = _build_allowed_tokens(body_fallback, context, pitch)
+        self.assertIn("87", allowed, "87 doit etre autorise car present dans le contexte")
+
+        body_llm = (
+            "Bonjour Dupont,\n\n"
+            "Le score de priorite de cet incident est de 87. "
+            "EverTrack peut vous aider.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_llm, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, context, pitch)
+
+        self.assertTrue(result["llm_used"], f"reason={result['reason']!r}")
+        self.assertIsNone(result["reason"])
+
+    # --- Test : chiffres reels de l'exemple (telephone) declenchent fallback ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="Contact : +33 6 26 64 98 41",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_hallucination_guard_triggers_on_example_phone_leak(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        L'exemple contient un numero de telephone (+33 6 26 64 98 41).
+        Si le LLM fuit "06 26 64 98 41" dans sa sortie, "26", "64", "98", "41"
+        sont des tokens absents du contexte/pitch/fallback.
+        Seuls les tokens >= 2 chiffres declenchent le garde-fou : "26", "64",
+        "98", "41" font tous >= 2 chiffres => fallback hallucination_detected.
+        """
+        body_fallback = _make_body_fallback()
+        context = _make_context(score_total=75.0)
+        pitch = _make_pitch()
+        allowed = _build_allowed_tokens(body_fallback, context, pitch)
+        # Verifie que les segments du numero ne sont pas dans le set autorise
+        for token in ("26", "64", "98", "41"):
+            self.assertNotIn(token, allowed, f"{token} ne doit pas etre autorise")
+
+        # LLM retourne un body avec le numero tel quel
+        body_leaked = (
+            "Bonjour Dupont,\n\n"
+            "Appelez-nous au 06 26 64 98 41 pour en discuter.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_leaked, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, context, pitch)
+
+        self.assertFalse(result["llm_used"])
+        self.assertEqual(result["reason"], "hallucination_detected")
+        self.assertEqual(result["body_md"], body_fallback)
+
+
+class TestLinkInjectionGuard(unittest.TestCase):
+    """
+    Verifie le garde-fou link_injection :
+    - URLs, emails, numeros de telephone hors set autorise => fallback link_injection.
+    - Les liens presents dans pitch.json et body_fallback restent autorises.
+    """
+
+    # --- Test : URL de l'exemple fuit dans la sortie LLM ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value=(
+            "Visitez www.evertrack.io pour en savoir plus. "
+            "Contact : sylvain.zawal@evertrack.io"
+        ),
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_url_injection_from_example_triggers_fallback(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        L'exemple contient www.evertrack.io. Le LLM reprend cette URL dans
+        sa sortie => garde-fou link_injection => fallback.
+        """
+        body_fallback = _make_body_fallback()
+        # Verifie que www.evertrack.io n'est pas dans le pitch ni le fallback
+        pitch = _make_pitch()
+        allowed_urls, _, _ = _build_allowed_link_tokens(body_fallback, pitch)
+        self.assertNotIn("www.evertrack.io", allowed_urls)
+
+        body_with_url = (
+            "Bonjour Dupont,\n\n"
+            "Pour plus d information, consultez www.evertrack.io.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_with_url, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, _make_context(), pitch)
+
+        self.assertFalse(result["llm_used"])
+        self.assertEqual(result["reason"], "link_injection")
+        self.assertEqual(result["body_md"], body_fallback)
+
+    # --- Test : email de l'exemple fuit dans la sortie LLM ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="Contactez-nous : sylvain.zawal@evertrack.io",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_email_injection_from_example_triggers_fallback(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        L'exemple contient sylvain.zawal@evertrack.io. Le LLM le reprend
+        dans sa sortie => garde-fou link_injection => fallback.
+        """
+        body_fallback = _make_body_fallback()
+        pitch = _make_pitch()
+        _, allowed_emails, _ = _build_allowed_link_tokens(body_fallback, pitch)
+        self.assertNotIn("sylvain.zawal@evertrack.io", allowed_emails)
+
+        body_with_email = (
+            "Bonjour Dupont,\n\n"
+            "Repondez a sylvain.zawal@evertrack.io pour planifier un echange.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_with_email, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, _make_context(), pitch)
+
+        self.assertFalse(result["llm_used"])
+        self.assertEqual(result["reason"], "link_injection")
+        self.assertEqual(result["body_md"], body_fallback)
+
+    # --- Test : telephone de l'exemple fuit dans la sortie LLM ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="Contact : +33 6 26 64 98 41",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_phone_injection_from_example_triggers_fallback(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        L'exemple contient +33 6 26 64 98 41. Le LLM reprend le numero dans
+        sa sortie => garde-fou link_injection (ou hallucination si segments
+        absents du contexte). On verifie juste que llm_used=False.
+
+        Note : le garde-fou hallucination peut aussi se declencher si les
+        segments numeriques (26, 64, 98, 41) sont absents du set autorise.
+        Dans les deux cas le fallback est utilise.
+        """
+        body_fallback = _make_body_fallback()
+        pitch = _make_pitch()
+
+        body_with_phone = (
+            "Bonjour Dupont,\n\n"
+            "Appelez-nous au 06 26 64 98 41 pour en discuter.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_with_phone, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, _make_context(), pitch)
+
+        self.assertFalse(result["llm_used"])
+        # Declenche hallucination_detected (segments num) ou link_injection (prefixe +33)
+        self.assertIn(result["reason"], ("hallucination_detected", "link_injection"))
+        self.assertEqual(result["body_md"], body_fallback)
+
+    # --- Test : URL du pitch est autorisee ---
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch(
+        "redacteur_outreach.llm_rewriter.load_style_example",
+        return_value="Exemple sans lien pertinent.",
+    )
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_url_from_pitch_signature_is_allowed(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        Une URL presente dans pitch.json.signature est dans le set autorise.
+        Le LLM peut la reprendre sans declencher link_injection.
+        """
+        body_fallback = _make_body_fallback()
+        # Pitch avec URL dans la signature
+        pitch = _make_pitch()
+        pitch["signature"] = "Cordialement,\nEquipe EverTrack\nwww.evertrack.io"
+
+        # Verifie que l'URL est bien dans le set autorise
+        allowed_urls, _, _ = _build_allowed_link_tokens(body_fallback, pitch)
+        self.assertIn("www.evertrack.io", allowed_urls)
+
+        body_with_allowed_url = (
+            "Bonjour Dupont,\n\n"
+            "Decouvrez notre solution sur www.evertrack.io.\n\n"
+            "Cordialement,\nEquipe EverTrack\nwww.evertrack.io"
+        )
+        mock_client = _make_mock_client(body_with_allowed_url, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, _make_context(), pitch)
+
+        self.assertTrue(result["llm_used"], f"reason={result['reason']!r}")
+        self.assertIsNone(result["reason"])
+
+
+class TestAllowedTokensRestrictedSubset(unittest.TestCase):
+    """
+    Verifie que _build_allowed_tokens n'inclut pas les champs sensibles
+    du contexte (siren, siret) dans le set de tokens autorises.
+    """
+
+    def test_siren_in_context_not_allowed_in_body(self) -> None:
+        """
+        Le contexte contient siren='123456789'. Le LLM renvoie un body
+        qui contient ce SIREN. => fallback hallucination_detected car
+        '123456789' n'est pas dans le set autorise (sous-set restreint).
+        """
+        body_fallback = _make_body_fallback()
+        context = _make_context()
+        pitch = _make_pitch()
+
+        # Verifie que le siren n'est PAS dans le set autorise
+        allowed = _build_allowed_tokens(body_fallback, context, pitch)
+        self.assertNotIn("123456789", allowed, "siren ne doit pas etre dans le set autorise")
+
+    @patch.dict(os.environ, {"ANTHROPIC_API_KEY": "fake-key"}, clear=False)
+    @patch("redacteur_outreach.llm_rewriter.load_style_example", return_value=None)
+    @patch("redacteur_outreach.llm_rewriter.Anthropic")
+    def test_siren_in_body_llm_triggers_hallucination(
+        self,
+        mock_anthropic_class: MagicMock,
+        mock_load_style: MagicMock,
+    ) -> None:
+        """
+        Si le LLM inclut le SIREN '123456789' dans sa sortie, le garde-fou
+        hallucination_detected doit se declencher (SIREN exclu du set autorise).
+        """
+        body_fallback = _make_body_fallback()
+        context = _make_context()
+        pitch = _make_pitch()
+
+        body_with_siren = (
+            "Bonjour Dupont,\n\n"
+            "L entreprise ACME (SIREN 123456789) a procede a un rappel.\n\n"
+            "Cordialement,\nEquipe EverTrack"
+        )
+        mock_client = _make_mock_client(body_with_siren, "Objet test")
+        mock_anthropic_class.return_value = mock_client
+
+        result = rewrite(body_fallback, context, pitch)
+
+        self.assertFalse(result["llm_used"])
+        self.assertEqual(result["reason"], "hallucination_detected")
+        self.assertEqual(result["body_md"], body_fallback)
+
+
+class TestExtractHelpers(unittest.TestCase):
+    """Tests des helpers d'extraction URLs/emails/telefone."""
+
+    def test_extract_urls_https(self) -> None:
+        urls = _extract_urls("Voir https://example.com/page pour details.")
+        self.assertIn("https://example.com/page", urls)
+
+    def test_extract_urls_www(self) -> None:
+        urls = _extract_urls("Visitez www.evertrack.io maintenant.")
+        self.assertIn("www.evertrack.io", urls)
+
+    def test_extract_urls_empty(self) -> None:
+        self.assertEqual(_extract_urls("aucune url ici"), set())
+
+    def test_extract_emails_basic(self) -> None:
+        emails = _extract_emails("Contactez contact@example.com svp.")
+        self.assertIn("contact@example.com", emails)
+
+    def test_extract_emails_case_insensitive(self) -> None:
+        emails = _extract_emails("Email: Contact@Example.COM")
+        self.assertIn("contact@example.com", emails)
+
+    def test_extract_emails_empty(self) -> None:
+        self.assertEqual(_extract_emails("pas d email ici"), set())
+
+    def test_extract_phone_tokens_intl_prefix(self) -> None:
+        tokens = _extract_phone_tokens("Appelez +33 6 12 34 56 78.")
+        self.assertIn("+33", tokens)
+
+    def test_extract_phone_tokens_groups(self) -> None:
+        tokens = _extract_phone_tokens("Tel : 06 26 64 98 41")
+        # Doit trouver le groupe "06 26 64 98 41" (4+ groupes de 2 chiffres)
+        self.assertTrue(len(tokens) > 0, "Doit detecter un groupe de telephone")
+
+    def test_extract_phone_tokens_empty(self) -> None:
+        tokens = _extract_phone_tokens("Aucun numero ici")
+        self.assertEqual(tokens, set())
+
+    def test_build_allowed_link_tokens_pitch_url(self) -> None:
+        pitch = _make_pitch()
+        pitch["signature"] = "Cordialement\nwww.exemple.fr"
+        allowed_urls, _, _ = _build_allowed_link_tokens("", pitch)
+        self.assertIn("www.exemple.fr", allowed_urls)
+
+    def test_build_allowed_link_tokens_excludes_example(self) -> None:
+        """L'exemple n'est pas passe a _build_allowed_link_tokens."""
+        body_fallback = ""
+        pitch = _make_pitch()  # signature sans URL
+        allowed_urls, allowed_emails, _ = _build_allowed_link_tokens(body_fallback, pitch)
+        # Aucune URL ni email dans pitch ni fallback vide
+        self.assertNotIn("www.evertrack.io", allowed_urls)
+        self.assertNotIn("sylvain.zawal@evertrack.io", allowed_emails)
 
 
 if __name__ == "__main__":

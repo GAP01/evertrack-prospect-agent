@@ -3,6 +3,9 @@
 *.env
 .env.*
 
+# Exemple stylistique outreach (peut contenir des coordonnées réelles)
+agents/redacteur_outreach/style_examples/example_default.txt
+
 # Python
 __pycache__/
 *.py[cod]
