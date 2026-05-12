@@ -20,10 +20,11 @@ class TestRegistry(unittest.TestCase):
     """Le registre indexe les collectors enregistrés via @register."""
 
     def test_default_collectors_registered(self):
-        """google_news et reddit sont enregistrés au chargement du package."""
+        """google_news, reddit, signalconso et tiktok sont enregistres au chargement du package."""
         names = list_collectors()
         self.assertIn("google_news", names)
         self.assertIn("reddit", names)
+        self.assertIn("tiktok", names)
 
     def test_get_collector_returns_callable(self):
         """get_collector retourne un callable pour une source connue."""

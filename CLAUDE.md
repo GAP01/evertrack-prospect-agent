@@ -70,7 +70,7 @@ enrichissements.sqlite         │
 | **veilleur_incidents** | Crawl RappelConso, normalise, dédup | API RappelConso | `incidents.sqlite` |
 | **evaluateur_severite** | Score sanitaire 0-100 via Claude Haiku + règles fallback | `incidents.sqlite` | `scores.sqlite` |
 | **enrichisseur_prospects** | Match marque → SIRENE + contact cible/dirigeant | `incidents.sqlite` | `enrichissements.sqlite` |
-| **detecteur_signaux** | Détection presse/social + cross-ref avec incidents | Google News + Reddit | `signaux.sqlite` |
+| **detecteur_signaux** | Détection presse/social + cross-ref avec incidents | Google News + Reddit + TikTok (optionnel) | `signaux.sqlite` |
 | **dashboard_reflex** | Visualisation + validation humaine | Les 4 SQLite | SPA web |
 
 ---
@@ -175,6 +175,12 @@ python -m detecteur_signaux.cli fetch --no-llm --no-scrape
 # Uniquement Google News
 python -m detecteur_signaux.cli fetch --sources google_news
 
+# Uniquement TikTok
+python -m detecteur_signaux.cli fetch --sources tiktok
+
+# Combinaison des trois sources
+python -m detecteur_signaux.cli fetch --sources google_news,reddit,tiktok
+
 # Liste signaux
 python -m detecteur_signaux.cli list --status a_valider --min-score 40
 
@@ -236,6 +242,9 @@ Fichier **`agents/.env`** (jamais commité — vérifié dans `.gitignore`).
 | `ANTHROPIC_API_KEY` | Recommandé | Agent 2 (scoring sanitaire) + Agent 4 (extraction LLM) |
 | `PAPPERS_API_KEY` | Optionnel | Agent 3 (contact dirigeant) — peut retourner 401 selon plan |
 | `SOCIETECOM_API_KEY` | Optionnel | Agent 3 (stub prêt, pas encore implémenté) |
+| `TIKTOK_BRIDGE_BASE_URL` | Optionnel | Agent 4 : URL d'instance RSS-bridge auto-hebergee (tier 1 TikTok) |
+| `TIKTOK_USER_AGENT` | Optionnel | Agent 4 : UA custom pour le scraping direct TikTok (tier 2) |
+| `TIKTOK_ALLOW_INSECURE_BRIDGE` | Optionnel | Agent 4 : `1` pour bypasser la validation SSRF (bridge LAN). Ne pas activer en production exposee. |
 
 Sans `ANTHROPIC_API_KEY` : les agents basculent sur leur fallback déterministe.
 Sans `PAPPERS_API_KEY` : les contacts viennent uniquement de SIRENE (dirigeants légaux).
@@ -349,7 +358,8 @@ Utile pour tester sur mobile ou envoyer un lien au client.
 
 ### Agent 4 — Signaux faibles
 - **Sources** : Google News RSS (gratuit, pas d'auth) + Reddit JSON public
-  (subreddits `r/france`, `r/Consommateurs`, `r/AskFrance`)
+  (subreddits `r/france`, `r/Consommateurs`, `r/AskFrance`) + TikTok (optionnel,
+  3 tiers fallback-first — voir ci-dessous)
 - **Extraction LLM** : Claude Haiku via `extractor.py` — retourne marque, produit,
   symptôme, is_alim, resume. Fallback regex + `SYMPTOM_TO_KEYWORDS`.
 - **Dedup stable** : `signal_id = sha1(marque + symptome + day)[:16]` — ordre de
@@ -368,6 +378,16 @@ Utile pour tester sur mobile ou envoyer un lien au client.
 - **Validation workflow** : `faible` → `a_valider` (auto si score ≥ 40) →
   `valide` (humain) → `promu` (incident créé dans `incidents.sqlite` avec
   `source="signal_detecteur"`)
+- **Source TikTok** (ADR-006) : multi-tier fallback-first — tier 1 RSS-bridge
+  auto-heberge (`feedparser`, deja en deps), tier 2 scraping direct
+  `tiktok.com/tag/<hashtag>` (parse blob JSON `__UNIVERSAL_DATA_FOR_REHYDRATION__`),
+  tier 3 degraded mode (log WARNING, source sautee, agent continue). Pas de LLM
+  video au stade 1. Poids `SOURCE_WEIGHTS` : `"tiktok"` = 10 (generique),
+  `"tiktok @60millions"` = 25, `"tiktok @dgccrf"` = 30. Durcissement SSRF sur
+  l'URL du bridge (schemas non http/https et IPs privees/loopback rejetees) +
+  caps taille reponse (2 MB Atom, 10 MB HTML) + cap 200 items/hashtag.
+  Non activee par defaut — configurer `TIKTOK_BRIDGE_BASE_URL` ou laisser vide
+  pour le tier 2 direct.
 
 ### Cross-référence signaux ↔ incidents
 - **4 dimensions** pondérées (somme = 1.0) :

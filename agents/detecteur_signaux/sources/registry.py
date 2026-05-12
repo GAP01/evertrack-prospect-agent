@@ -57,6 +57,7 @@ def _ensure_collectors_loaded() -> None:
     from . import google_news  # noqa: F401
     from . import reddit  # noqa: F401
     from . import signalconso  # noqa: F401
+    from . import tiktok  # noqa: F401
 
 
 def get_collector(name: str) -> SourceCollector | None:
