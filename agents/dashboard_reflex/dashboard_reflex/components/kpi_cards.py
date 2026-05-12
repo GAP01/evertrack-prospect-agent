@@ -113,14 +113,26 @@ def kpi_cards() -> rx.Component:
             "#d97706",
             hint="",
             tooltip=(
-                "Date de la dernière exécution de l'évaluateur de sévérité "
-                "(Agent 2). À recalculer après chaque rafraîchissement de la veille "
+                "Date de la derniere execution de l'evaluateur de severite "
+                "(Agent 2). A recalculer apres chaque rafraichissement de la veille "
                 "pour scorer les nouveaux incidents."
+            ),
+        ),
+        _card(
+            "MESSAGES A VALIDER",
+            DashboardState.outreach_kpi_a_valider.to_string(),
+            "mail",
+            "#f0f9ff",
+            "#0284c7",
+            hint="outreach en attente",
+            tooltip=(
+                "Nombre de messages d'accroche generes par l'Agent 5 "
+                "en attente de validation humaine avant envoi."
             ),
         ),
         style={
             "display": "grid",
-            "grid-template-columns": "repeat(4, 1fr)",
+            "grid-template-columns": "repeat(5, 1fr)",
             "gap": "16px",
             "width": "100%",
             "padding-bottom": "24px",

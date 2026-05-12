@@ -23,6 +23,7 @@ from .components.signaux_table import signaux_table
 from .components.signal_detail_drawer import signal_detail_drawer
 from .components.volumes_table import volumes_table
 from .components.volume_detail_drawer import volume_detail_drawer
+from .components.outreach_drawer import outreach_drawer
 
 
 def _prospects_header() -> rx.Component:
@@ -257,6 +258,7 @@ def index() -> rx.Component:
         prospect_detail_drawer(),
         signal_detail_drawer(),
         volume_detail_drawer(),
+        outreach_drawer(),
         width="100%",
         min_height="100vh",
         background="#f9fafb",

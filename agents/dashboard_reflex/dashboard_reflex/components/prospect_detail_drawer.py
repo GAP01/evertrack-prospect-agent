@@ -207,6 +207,24 @@ def prospect_detail_drawer() -> rx.Component:
                         ),
                     ),
 
+                    # Actions outreach
+                    _section_title("ACTIONS"),
+                    rx.button(
+                        rx.hstack(
+                            rx.icon("mail", size=14),
+                            rx.text("Message"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        on_click=DashboardState.open_outreach_drawer(
+                            e["source"].to(str),
+                            e["source_id"].to(str),
+                        ),
+                        color_scheme="indigo",
+                        variant="soft",
+                        size="2",
+                    ),
+
                     # Enrichissement
                     _section_title("ENRICHISSEMENT"),
                     rx.cond(
