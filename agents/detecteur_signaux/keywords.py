@@ -164,8 +164,29 @@ SOURCE_WEIGHTS = {
     "r/france": 15,
     "r/consommateurs": 18,
     "r/askfrance": 12,
+    # TikTok (comptes officiels pondérés plus haut que le flux générique)
+    "tiktok": 10,
+    "tiktok @60millions": 25,
+    "tiktok @dgccrf": 30,
 }
 
 # Score par défaut pour source inconnue (calibré à 12 : Google News relaie
 # beaucoup de presse régionale pas forcément dans le dico mais crédible)
 DEFAULT_SOURCE_WEIGHT = 12
+
+# --- Hashtags TikTok (sans #, ASCII uniquement) ---------------------------
+
+# Utilisés pour construire les requêtes TikTok API / scraping.
+# Ordre : du plus ciblé rappel officiel au plus générique santé.
+TIKTOK_HASHTAGS = [
+    "rappelproduit", "rappelconso", "intoxalimentaire",
+    "salmonelle", "listeria", "alertealimentaire",
+    "produitcontamine", "alimentdangereux",
+]
+
+# Comptes TikTok cibles pour le tier 1 RSS-Bridge (mode "By user").
+# RSS-Bridge stock supporte uniquement le mode user, pas hashtag.
+# Source haute valeur : presse conso, autorites, organismes verifies.
+TIKTOK_BRIDGE_USERS = [
+    "60millions",
+]

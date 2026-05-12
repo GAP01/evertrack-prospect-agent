@@ -17,8 +17,12 @@ detecteur_signaux/
 ├── models.py              # SignalAlerte, SignalSource, SCORE_SEUIL_ALERTE
 ├── keywords.py            # Lexique symptômes, queries Google News/Reddit, SOURCE_WEIGHTS
 ├── sources/
+│   ├── config.py          # SourceConfig — parametres par source
+│   ├── registry.py        # @register decorator + _ensure_collectors_loaded
 │   ├── google_news.py     # feedparser-based RSS fetcher
-│   └── reddit.py          # JSON API publique (User-Agent obligatoire)
+│   ├── reddit.py          # JSON API publique (User-Agent obligatoire)
+│   ├── signalconso.py     # API SignalConso (plaintes DGCCRF)
+│   └── tiktok.py          # 3 tiers : RSS-bridge / scraping direct / degraded mode
 ├── extractor.py           # Claude Haiku extraction + fallback regex
 ├── deduplicator.py        # compute_signal_id (hash stable marque/produit/symptome+jour)
 ├── scorer.py              # 5 composantes : source, recurrence, recency, brand_known, sentiment
@@ -126,6 +130,7 @@ googlenewsdecoder>=0.1.7
 |---|---|---|---|
 | **Google News** | `news.google.com/rss/search?q=…&hl=fr&gl=FR` | Aucune | URLs masquées, résolues via `googlenewsdecoder` |
 | **Reddit** | `reddit.com/r/<sub>/search.json` | User-Agent custom | Rate limit 1.5s, filtre `score ≥ 2` |
+| **TikTok** | `tiktok.com/tag/<hashtag>` (tier 2) ou RSS-bridge auto-heberge (tier 1) | Aucune (tier 2) ou bridge auto-heberge (tier 1) | Fallback-first 3 tiers, cap 200 items/hashtag, 10 MB HTML / 2 MB Atom, validation SSRF sur URL bridge |
 | **Claude API** | Haiku 4.5 | `ANTHROPIC_API_KEY` | Extraction marque/produit/symptôme + is_alim |
 
 ### Subreddits ciblés (`keywords.py`)
@@ -143,6 +148,8 @@ REDDIT_SUBREDDITS = ["france", "Consommateurs", "AskFrance"]
 "marmiton": 18, "cuisine az": 17, "femme actuelle": 18,
 # Reddit : 12-18 selon sub
 "r/consommateurs": 18, "r/france": 15, "r/askfrance": 12,
+# TikTok : poids conservateur (bruit elevé), comptes verifies surponderes
+"tiktok": 10, "tiktok @60millions": 25, "tiktok @dgccrf": 30,
 # Default inconnu : 12
 ```
 
@@ -319,3 +326,13 @@ une liste de patterns spécifiques :
 - **Regen DB** : `rm data/signaux.sqlite` puis `python -m detecteur_signaux.cli stats`
   recrée la base vide via la migration. Attention : perd l'historique des
   validations humaines.
+- **TikTok — fragilite du regex JSON_BLOB_PATTERN** : la constante
+  `JSON_BLOB_PATTERN = r"__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*(\{.+?\})\s*</script>"`
+  dans `sources/tiktok.py` cible une clé HTML injected par le SSR TikTok.
+  TikTok renomme ou restructure cette clé tous les 3-6 mois. Si le tier 2
+  (scraping direct) retourne systematiquement 0 item alors que des videos
+  existent, verifier d'abord le regex sur un dump HTML frais (curl ou devtools)
+  avant de diagnostiquer un blocage IP. La fonction `_walk_video_list` teste
+  deux paths alternatifs dans le blob — en ajouter un troisieme si la structure
+  a change. Prevoir une alerte monitoring sur le taux de succes tier 2 (< 5
+  items sur un hashtag actif = signal de casse probable).

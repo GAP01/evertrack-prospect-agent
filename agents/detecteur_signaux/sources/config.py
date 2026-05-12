@@ -38,8 +38,21 @@ class SourceConfig:
     # Default actuel : Alimentation + Cosmétiques + Produits de soin
     signalconso_categories: Optional[list[str]] = None
 
-    # --- RASFF (Phase 2, slot prêt) --------------------------------------
-    # Filtre pays (codes ISO) — None = FR seul.
+    # --- RASFF (Phase 2, slot pret) --------------------------------------
+    # Filtre pays (codes ISO) -- None = FR seul.
     rasff_country_filter: Optional[list[str]] = None
     # Inclure les notifications feed (alimentation animale)
     rasff_include_feed: bool = False
+
+    # --- TikTok ----------------------------------------------------------
+    # None => utilise TIKTOK_HASHTAGS depuis keywords.py
+    tiktok_hashtags: Optional[list[str]] = None
+    # None => utilise TIKTOK_BRIDGE_USERS depuis keywords.py
+    # Mode user du RSS-Bridge (le bridge stock ne supporte pas hashtag).
+    tiktok_bridge_users: Optional[list[str]] = None
+    # URL d'instance RSS-bridge auto-hebergee (tier 1).
+    # None => tier 1 desactive, fallback direct sur le scraping tier 2.
+    tiktok_bridge_base_url: Optional[str] = None
+    # Filtre minimal sur view_count si dispo dans la source. Defensive :
+    # si view_count non parseable, l'item passe.
+    tiktok_min_view_count: int = 1000
