@@ -1,0 +1,42 @@
+# Secrets
+.env
+*.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Bases de données (générées localement)
+agents/data/*.sqlite
+agents/data/*.json
+
+# Reflex (auto-généré)
+.web/
+.states/
+
+# Logs
+*.log
+
+# Documents de présentation / cadrage client
+presentation/
+*.docx
+*.pdf
+*.pptx
+RECAP_SESSION_*.md
+
+# Claude Code local
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

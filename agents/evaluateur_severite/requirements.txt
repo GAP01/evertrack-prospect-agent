@@ -1,0 +1,4 @@
+# Optionnel : decommenter pour activer le scoring LLM via Claude API.
+# Sans ce package (ou sans ANTHROPIC_API_KEY), l'agent bascule
+# automatiquement sur la table de mots-cles deterministe.
+anthropic>=0.30.0

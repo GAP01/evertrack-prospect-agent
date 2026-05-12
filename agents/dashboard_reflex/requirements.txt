@@ -1,0 +1,10 @@
+reflex>=0.6.0
+
+# Deps transitives des autres agents utilises via services/data.py :
+# - dashboard.actions importe veilleur_incidents et evaluateur_severite
+#   au niveau module, donc Reflex declenche leur import au boot.
+# - veilleur_incidents : requests (API RappelConso) + python-dateutil (parsing dates)
+# - evaluateur_severite : anthropic (Claude Haiku pour risque sanitaire)
+requests>=2.31.0
+python-dateutil>=2.8.2
+anthropic>=0.30.0
