@@ -193,6 +193,29 @@ python -m detecteur_signaux.cli crossref
 python -m detecteur_signaux.cli scrape-links --sleep 0.3
 ```
 
+### Agent 5 — Rédacteur outreach
+```bash
+# Générer un message pour un incident
+python -m redacteur_outreach.cli generate <source_id> [--source rappelconso] [--no-llm] [--force]
+
+# Générer en batch (incidents enrichis filtrés par score)
+python -m redacteur_outreach.cli generate-batch [--min-score 60] [--max N] [--no-llm]
+
+# Liste / détail / formats
+python -m redacteur_outreach.cli list [--status a_valider] [--limit 50]
+python -m redacteur_outreach.cli show <message_id> [--format md|json|eml]
+
+# Workflow validation humaine
+python -m redacteur_outreach.cli validate <message_id> --accept
+python -m redacteur_outreach.cli validate <message_id> --reject
+python -m redacteur_outreach.cli mark-sent <message_id>
+python -m redacteur_outreach.cli set-status <message_id> --status <s>
+python -m redacteur_outreach.cli regenerate <message_id> [--no-llm]
+
+# Stats
+python -m redacteur_outreach.cli stats
+```
+
 ### Tests
 ```bash
 # Par agent
@@ -364,6 +387,18 @@ Utile pour tester sur mobile ou envoyer un lien au client.
   matches confirmés remontent en tête et survivent aux recomputes (`clear_matches(keep_confirmed=True)`)
 - **Table** : `signal_incident_matches` (PRIMARY KEY composite signal_id + incident_source + incident_source_id)
 
+### Agent 5 — Rédaction outreach
+- **Approche hybride** : `string.Template` produit un brouillon factuel, Claude Haiku le réécrit pour le style (paramétrable via `--no-llm`).
+- **Fallback déterministe** : sans `ANTHROPIC_API_KEY`, le template seul est livré. Statut résultant : `brouillon`. Avec LLM OK : `a_valider`.
+- **Garde-fous hallucination** :
+  - Set de tokens numériques autorisés = `context` + `body_fallback` + `pitch`. Tout chiffre supplémentaire en sortie LLM → fallback (`reason="hallucination_detected"`).
+  - Sortie non-ASCII → fallback (`reason="non_ascii_detected"`) — cp1252 Windows.
+- **AUCUN envoi automatique** : le statut `envoye` est manuel uniquement. L'utilisateur copie le body via le bouton Copier du drawer dashboard.
+- **Idempotence** : `Redacteur.generate(source, source_id)` retourne l'existant. `--force` force la régénération. `message_id = sha1(source|source_id)[:16]`.
+- **Sources de données** : agrège `incidents` + `scores` + `enrichissements` + `signaux` (via `context_builder.build_context`). `context_json` figé en DB pour audit.
+- **Config pitch** : `pitch.json` (stdlib `json`, multi-ligne via `\n`). Clés : `editeur_nom`, `pitch_court`, `valeur_immediate`, `cta`, `signature`, `opt_out_placeholder` (RGPD réservé).
+- **Workflow** : `brouillon` → `a_valider` → `valide` → `envoye` (et `rejete`). Bouton "Message" dans le drawer Prospect du dashboard ouvre le drawer outreach.
+
 ---
 
 ## 7. État courant & prochaines étapes
@@ -373,10 +408,9 @@ Utile pour tester sur mobile ou envoyer un lien au client.
 - Dashboard Reflex 3 pages avec drawers + validation humaine + mobile responsive
 - Cross-référence signal↔incident avec auto-confirm par lien RappelConso
 - Tunnel Cloudflare pour accès externe
+- Agent 5 (rédacteur outreach) : génération brouillon hybride template+LLM, workflow validation humaine, drawer dashboard
 
 ### À faire
-- **Agent 5 — Rédaction outreach** : email personnalisé depuis contexte incident
-  + enrichissement prospect (prompt Claude + template)
 - **Intégration CRM** : push leads vers Sellsy
 - **Pappers 401** : vérifier plan/activation de la clé
 - **Déploiement continu** : serveur dédié (actuellement local + cloudflared)

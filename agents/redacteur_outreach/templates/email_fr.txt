@@ -1,0 +1,15 @@
+Bonjour ${contact_civilite},
+
+Je me permets de vous ecrire suite au rappel ${marque_pretty} du ${date_publication_fr} concernant ${produit_pretty}${categorie_suffix}.
+
+${motif_resume}${bloc_signaux_optionnel}
+
+${pitch_court}
+
+${valeur_immediate}
+
+${cta}
+
+${signature}
+
+${opt_out}

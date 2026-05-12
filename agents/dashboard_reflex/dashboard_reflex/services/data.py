@@ -33,6 +33,7 @@ INCIDENTS_DB = DATA_DIR / "incidents.sqlite"
 SCORES_DB = DATA_DIR / "scores.sqlite"
 ENRICHISSEMENTS_DB = DATA_DIR / "enrichissements.sqlite"
 SIGNAUX_DB = DATA_DIR / "signaux.sqlite"
+OUTREACH_DB = DATA_DIR / "outreach.sqlite"
 
 DEMO_MODE = os.environ.get("EVERTRACK_DEMO_MODE", "").strip() in ("1", "true", "yes")
 
@@ -674,3 +675,73 @@ def get_volume_stats() -> dict[str, Any]:
         "last_run_at": last_run,              # nouveau, sémantiquement clair
         "last_run_emitted": last_emitted,
     }
+
+
+# ── Outreach messages (Agent 5 — redacteur_outreach) ────────────────────────
+
+def _outreach_connect():
+    """Ouvre une connexion vers outreach.sqlite (crée le fichier au besoin)."""
+    from redacteur_outreach.storage import OutreachStorage
+    return OutreachStorage(str(OUTREACH_DB))
+
+
+def get_outreach_message(source: str, source_id: str) -> Optional[dict[str, Any]]:
+    """Retourne le message outreach pour (source, source_id), ou None si absent."""
+    import dataclasses
+    try:
+        storage = _outreach_connect()
+        msg = storage.get_by_source(source, source_id)
+        storage.close()
+        return dataclasses.asdict(msg) if msg is not None else None
+    except Exception:
+        return None
+
+
+def get_outreach_message_by_id(message_id: str) -> Optional[dict[str, Any]]:
+    """Retourne le message outreach par son message_id, ou None si absent."""
+    import dataclasses
+    try:
+        storage = _outreach_connect()
+        msg = storage.get(message_id)
+        storage.close()
+        return dataclasses.asdict(msg) if msg is not None else None
+    except Exception:
+        return None
+
+
+def set_outreach_status(
+    message_id: str,
+    status: str,
+    *,
+    validated_at: Optional[str] = None,
+    sent_at: Optional[str] = None,
+) -> None:
+    """Met a jour le statut d'un message outreach."""
+    try:
+        storage = _outreach_connect()
+        storage.set_status(message_id, status, validated_at=validated_at, sent_at=sent_at)
+        storage.close()
+    except Exception:
+        pass
+
+
+def count_outreach_a_valider() -> int:
+    """Nombre de messages en statut 'a_valider'."""
+    try:
+        storage = _outreach_connect()
+        counts = storage.count_by_status()
+        storage.close()
+        return counts.get("a_valider", 0)
+    except Exception:
+        return 0
+
+
+def count_outreach_by_status() -> dict[str, int]:
+    """Nombre de messages par statut."""
+    try:
+        storage = _outreach_connect()
+        counts = storage.count_by_status()
+        storage.close()
+        return counts
+    except Exception:
+        return {}

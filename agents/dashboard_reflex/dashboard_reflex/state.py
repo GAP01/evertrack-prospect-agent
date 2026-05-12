@@ -32,6 +32,36 @@ _SIGNAL_ROW_KEYS = (
 
 _SIGNAL_DETAIL_KEYS = _SIGNAL_ROW_KEYS + ("resume", "detector_version")
 
+_OUTREACH_EMPTY: dict = {
+    "status": "absent",
+    "message_id": "",
+    "objet": "",
+    "body_md": "",
+    "body_fallback": "",
+    "llm_used": False,
+    "generated_at": "",
+    "validated_at": "",
+    "sent_at": "",
+    "notes": "",
+    "source": "",
+    "source_id": "",
+    "canal": "email",
+}
+
+
+def _normalize_outreach(msg: dict | None) -> dict:
+    """Convertit un dict OutreachMessage (ou None) en dict safe pour Reflex Var."""
+    if msg is None:
+        return dict(_OUTREACH_EMPTY)
+    str_fields = (
+        "status", "message_id", "objet", "body_md", "body_fallback",
+        "generated_at", "validated_at", "sent_at", "notes", "source",
+        "source_id", "canal",
+    )
+    out: dict = {k: (msg.get(k) or "") for k in str_fields}
+    out["llm_used"] = bool(msg.get("llm_used"))
+    return out
+
 
 def _normalize_signal_match(row: dict[str, Any]) -> dict[str, Any]:
     """Normalise un rappel officiel matché avec un signal (côté signal drawer)."""
@@ -311,6 +341,12 @@ class DashboardState(rx.State):
 
     volume_drawer_open: bool = False
     selected_volume: dict[str, Any] = {}
+
+    # --- Outreach (Agent 5) ---
+    outreach_drawer_open: bool = False
+    selected_outreach: dict = {}
+    outreach_busy: bool = False
+    outreach_kpi_a_valider: int = 0
 
     demo_mode: bool = data_service.DEMO_MODE
 
@@ -625,6 +661,120 @@ class DashboardState(rx.State):
     def set_prospect_drawer_open(self, value: bool):
         self.prospect_drawer_open = value
 
+    # --- Outreach (Agent 5) ---
+
+    def open_outreach_drawer(self, source: str, source_id: str):
+        msg = data_service.get_outreach_message(source, source_id)
+        if msg is None:
+            # Aucun message genere : placeholder avec les ids pour generation ulterieure
+            placeholder = dict(_OUTREACH_EMPTY)
+            placeholder["source"] = source
+            placeholder["source_id"] = source_id
+            self.selected_outreach = placeholder
+        else:
+            self.selected_outreach = _normalize_outreach(msg)
+        self.outreach_drawer_open = True
+
+    def close_outreach_drawer(self):
+        self.outreach_drawer_open = False
+
+    def set_outreach_drawer_open(self, value: bool):
+        self.outreach_drawer_open = value
+
+    def generate_outreach(self):
+        source = self.selected_outreach.get("source") or ""
+        source_id = self.selected_outreach.get("source_id") or ""
+        if not source or not source_id:
+            self._notify("Source manquante pour la generation", "error")
+            return
+        self.outreach_busy = True
+        yield
+        try:
+            from redacteur_outreach.storage import OutreachStorage
+            from redacteur_outreach.redacteur import Redacteur
+            from dashboard_reflex.services import data as _data_svc
+            storage = OutreachStorage(str(_data_svc.OUTREACH_DB))
+            redacteur = Redacteur(storage, data_dir=str(_data_svc.DATA_DIR))
+            redacteur.generate(source, source_id)
+            storage.close()
+            # Recharge le message depuis la base
+            msg = data_service.get_outreach_message(source, source_id)
+            self.selected_outreach = _normalize_outreach(msg)
+            self._refresh_outreach_kpi()
+            self._notify("Message genere", "success")
+        except Exception as exc:
+            self._notify("Erreur generation : " + str(exc), "error")
+        finally:
+            self.outreach_busy = False
+
+    def regenerate_outreach(self):
+        source = self.selected_outreach.get("source") or ""
+        source_id = self.selected_outreach.get("source_id") or ""
+        if not source or not source_id:
+            self._notify("Source manquante pour la regeneration", "error")
+            return
+        self.outreach_busy = True
+        yield
+        try:
+            from redacteur_outreach.storage import OutreachStorage
+            from redacteur_outreach.redacteur import Redacteur
+            from dashboard_reflex.services import data as _data_svc
+            storage = OutreachStorage(str(_data_svc.OUTREACH_DB))
+            redacteur = Redacteur(storage, data_dir=str(_data_svc.DATA_DIR))
+            redacteur.generate(source, source_id, force=True)
+            storage.close()
+            msg = data_service.get_outreach_message(source, source_id)
+            self.selected_outreach = _normalize_outreach(msg)
+            self._refresh_outreach_kpi()
+            self._notify("Message regenere", "success")
+        except Exception as exc:
+            self._notify("Erreur regeneration : " + str(exc), "error")
+        finally:
+            self.outreach_busy = False
+
+    def validate_outreach(self):
+        message_id = self.selected_outreach.get("message_id") or ""
+        if not message_id:
+            return
+        from datetime import datetime as _dt, timezone as _tz
+        now_iso = _dt.now(_tz.utc).isoformat(timespec="seconds")
+        data_service.set_outreach_status(message_id, "valide", validated_at=now_iso)
+        source = self.selected_outreach.get("source") or ""
+        source_id = self.selected_outreach.get("source_id") or ""
+        msg = data_service.get_outreach_message(source, source_id)
+        self.selected_outreach = _normalize_outreach(msg)
+        self._refresh_outreach_kpi()
+        self._notify("Message valide", "success")
+
+    def reject_outreach(self):
+        message_id = self.selected_outreach.get("message_id") or ""
+        if not message_id:
+            return
+        data_service.set_outreach_status(message_id, "rejete")
+        source = self.selected_outreach.get("source") or ""
+        source_id = self.selected_outreach.get("source_id") or ""
+        msg = data_service.get_outreach_message(source, source_id)
+        self.selected_outreach = _normalize_outreach(msg)
+        self._refresh_outreach_kpi()
+        self._notify("Message rejete", "info")
+
+    def mark_outreach_sent(self):
+        message_id = self.selected_outreach.get("message_id") or ""
+        if not message_id:
+            return
+        from datetime import datetime as _dt, timezone as _tz
+        now_iso = _dt.now(_tz.utc).isoformat(timespec="seconds")
+        data_service.set_outreach_status(message_id, "envoye", sent_at=now_iso)
+        source = self.selected_outreach.get("source") or ""
+        source_id = self.selected_outreach.get("source_id") or ""
+        msg = data_service.get_outreach_message(source, source_id)
+        self.selected_outreach = _normalize_outreach(msg)
+        self._refresh_outreach_kpi()
+        self._notify("Message marque comme envoye", "success")
+
+    def _refresh_outreach_kpi(self):
+        self.outreach_kpi_a_valider = data_service.count_outreach_a_valider()
+
     # --- Signaux faibles ---
 
     def _load_signaux(self):
@@ -814,6 +964,7 @@ class DashboardState(rx.State):
     def load_initial(self):
         self.sous_categories = data_service.list_sous_categories()
         self._refresh()
+        self._refresh_outreach_kpi()
 
     def _refresh(self):
         self.stats = data_service.get_stats()
@@ -905,6 +1056,7 @@ class DashboardState(rx.State):
 
     def refresh(self):
         self._refresh()
+        self._refresh_outreach_kpi()
         self._notify("Donnees rechargees", "info")
 
     def open_incident(self, source: str, source_id: str):
