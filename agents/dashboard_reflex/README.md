@@ -15,16 +15,25 @@ dashboard_reflex/
 └── dashboard_reflex/
     ├── __init__.py
     ├── dashboard_reflex.py     # point d'entree — routing + theme
-    ├── state.py                # DashboardState (Reflex)
+    ├── state.py                # DashboardState (Reflex) + @rx.var KPI outreach
     ├── services/
-    │   └── data.py             # bridge vers dashboard.data_access / actions
+    │   ├── data.py             # bridge vers dashboard.data_access / actions
+    │   │                       # + build_outreach_kpi (parse context_json)
+    │   ├── normalize.py        # couche pure (sans import Reflex) — testable
+    │   │                       # hors venv dashboard
+    │   └── tests/              # tests unitaires services (78 tests)
     └── components/
         ├── tier_badge.py
         ├── sidebar.py
         ├── header.py
         ├── kpi_cards.py
         ├── incident_table.py
-        └── incident_detail_drawer.py
+        ├── incident_detail_drawer.py
+        ├── prospects_table.py
+        ├── prospect_detail_drawer.py
+        ├── signaux_table.py
+        ├── signal_detail_drawer.py
+        └── outreach_drawer.py  # drawer 720px + section INSIGHTS (KPI graphiques)
 ```
 
 ## Installation
@@ -92,14 +101,43 @@ est exposee — Reflex gere automatiquement le chemin `_event` cote backend
 via sa configuration `api_url`. Si besoin, configurer `api_url` dans
 `rxconfig.py` pour pointer vers la meme origine publique.
 
+## Drawer outreach (page Prospects)
+
+Le drawer "Message" (`outreach_drawer.py`) s ouvre depuis la page Prospects.
+
+- **Largeur** : 720 px (bureau), 100 % largeur en dessous de 768 px.
+- **Section INSIGHTS** : affichee quand `context_json` est present, masquee
+  sinon (placeholder "Donnees KPI insuffisantes").
+  - KPI 1 Score sanitaire : radial bar chart (`rx.recharts`, 160x100 px).
+  - KPI 2 Sources mediatiques : bar chart horizontal par source
+    (`rx.recharts`), alimente par `signaux_summary` du `context_json`.
+  - KPI 3 Confidence prospect : barre CSS (`rx.progress`) + label texte
+    ("Contact cible 0.82" / "Fallback dirigeant" / "Non trouve").
+- **Zero requete supplementaire** : toutes les donnees KPI viennent du
+  `context_json` deja stocke en base a la generation du message.
+- **Vars `@rx.var` exposes** dans `state.py` :
+  `outreach_kpi_score_value`, `outreach_kpi_score_label`,
+  `outreach_kpi_score_color`, `outreach_kpi_sources_total`,
+  `outreach_kpi_sources_data`, `outreach_kpi_confidence_value`,
+  `outreach_kpi_confidence_percent`, `outreach_kpi_confidence_status`,
+  `outreach_kpi_has_data`.
+
+## services/normalize.py
+
+Module pur sans import Reflex. Contient `normalize_outreach_pure` et
+`build_outreach_kpi_pure` — memes regles que `state._normalize_outreach` et
+`data.build_outreach_kpi`, mais utilisables dans le venv standard des agents
+(sans installer Reflex). Sert de base aux tests de compatibilite ascendante
+(`test_backward_compat.py`, `test_state_kpi_vars.py`, `test_data_kpi.py`).
+
 ## Design
 
 - Palette : fond `#f9fafb`, cartes blanches, bordures `#e5e7eb`, accent
   `indigo` (#4f46e5), texte principal `#111827`.
 - Typographie : Inter (chargee via Google Fonts).
 - Sidebar fixe 260 px + contenu principal fluide.
-- Drawer droit 560 px pour le detail d'incident avec breakdown par
-  dimension (barres de progression ponderees).
+- Drawer droit 560 px pour le detail d incident, 720 px pour le drawer
+  outreach.
 
 ## Mode demo
 

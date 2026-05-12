@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 import reflex as rx
 
 from .services import data as data_service
+from .services.normalize import normalize_outreach_pure
 
 
 _ENRICH_ROW_KEYS = (
@@ -46,21 +48,23 @@ _OUTREACH_EMPTY: dict = {
     "source": "",
     "source_id": "",
     "canal": "email",
+    "context_json": "",
+    "kpi": {
+        "score_sanitaire": {"value": 0, "label": "Faible", "color": "green"},
+        "sources_media": {"total": 0, "by_source": []},
+        "confidence_prospect": {"value": 0.0, "percent": 0, "status": ""},
+    },
 }
 
 
 def _normalize_outreach(msg: dict | None) -> dict:
-    """Convertit un dict OutreachMessage (ou None) en dict safe pour Reflex Var."""
-    if msg is None:
-        return dict(_OUTREACH_EMPTY)
-    str_fields = (
-        "status", "message_id", "objet", "body_md", "body_fallback",
-        "generated_at", "validated_at", "sent_at", "notes", "source",
-        "source_id", "canal",
-    )
-    out: dict = {k: (msg.get(k) or "") for k in str_fields}
-    out["llm_used"] = bool(msg.get("llm_used"))
-    return out
+    """
+    Convertit un dict OutreachMessage (ou None) en dict safe pour Reflex Var.
+
+    Delegue a normalize_outreach_pure (services/normalize.py) qui n'importe
+    pas Reflex et peut etre testee dans tout venv Python 3.12.
+    """
+    return normalize_outreach_pure(msg)
 
 
 def _normalize_signal_match(row: dict[str, Any]) -> dict[str, Any]:
@@ -605,6 +609,89 @@ class DashboardState(rx.State):
             return ""
         return f"{n} signaux cette semaine"
 
+    # --- Computed : outreach KPI ---
+    # Ces vars lisent selected_outreach["kpi"], garanti présent par
+    # _normalize_outreach (via build_outreach_kpi). Elles sont plates pour
+    # que les composants Reflex n'aient pas à imbriquer des accès de dict.
+
+    @rx.var
+    def outreach_kpi_score_value(self) -> int:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        score = kpi.get("score_sanitaire") or {}
+        try:
+            return max(0, min(100, int(score.get("value") or 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    @rx.var
+    def outreach_kpi_score_label(self) -> str:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        score = kpi.get("score_sanitaire") or {}
+        return str(score.get("label") or "")
+
+    @rx.var
+    def outreach_kpi_score_color(self) -> str:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        score = kpi.get("score_sanitaire") or {}
+        return str(score.get("color") or "gray")
+
+    @rx.var
+    def outreach_kpi_sources_total(self) -> int:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        sources = kpi.get("sources_media") or {}
+        try:
+            return int(sources.get("total") or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @rx.var
+    def outreach_kpi_sources_data(self) -> list[dict]:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        sources = kpi.get("sources_media") or {}
+        raw = sources.get("by_source") or []
+        # Garantit que chaque élément est un dict avec les bons types
+        out = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            out.append({
+                "source": str(item.get("source") or ""),
+                "count": int(item.get("count") or 0),
+            })
+        return out
+
+    @rx.var
+    def outreach_kpi_confidence_value(self) -> float:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        conf = kpi.get("confidence_prospect") or {}
+        try:
+            return max(0.0, min(1.0, float(conf.get("value") or 0.0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @rx.var
+    def outreach_kpi_confidence_percent(self) -> int:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        conf = kpi.get("confidence_prospect") or {}
+        try:
+            return max(0, min(100, int(conf.get("percent") or 0)))
+        except (TypeError, ValueError):
+            return 0
+
+    @rx.var
+    def outreach_kpi_confidence_status(self) -> str:
+        kpi = (self.selected_outreach or {}).get("kpi") or {}
+        conf = kpi.get("confidence_prospect") or {}
+        return str(conf.get("status") or "")
+
+    @rx.var
+    def outreach_kpi_has_data(self) -> bool:
+        # True si un context_json non-vide est present dans le message selectionne.
+        # Ce critere est prefere aux seuils KPI > 0 qui masqueraient les messages
+        # legitimes avec score=0 (ex : incident sans risque sanitaire identifie).
+        ctx = (self.selected_outreach or {}).get("context_json") or ""
+        return ctx.strip() != ""
+
     # --- Navigation ---
 
     def nav_radar(self):
@@ -667,7 +754,7 @@ class DashboardState(rx.State):
         msg = data_service.get_outreach_message(source, source_id)
         if msg is None:
             # Aucun message genere : placeholder avec les ids pour generation ulterieure
-            placeholder = dict(_OUTREACH_EMPTY)
+            placeholder = copy.deepcopy(_OUTREACH_EMPTY)
             placeholder["source"] = source
             placeholder["source_id"] = source_id
             self.selected_outreach = placeholder

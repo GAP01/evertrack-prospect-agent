@@ -1,4 +1,4 @@
-# Agent 5 -- Redacteur outreach
+# Agent 5 -- Redacteur outreach (v1.1)
 
 Genere des brouillons d emails d accroche personnalises a partir des donnees
 collectees par les agents 1-4 (incidents RappelConso, scoring sanitaire,
@@ -182,6 +182,32 @@ python -m redacteur_outreach.cli stats
 
 Affiche le compte par statut et le total.
 
+## Exemple de style (optionnel)
+
+Le fichier `agents/redacteur_outreach/style_examples/example_default.txt`
+fournit un exemple d'email reel dont le LLM imite le ton et la structure
+narrative (pas le contenu factuel).
+
+Ce fichier est **exclu du depot git** (contient potentiellement des coordonnees
+reelles). Un template anonymise est versionne sous le nom
+`example_default.example.txt`.
+
+Pour initialiser votre propre exemple :
+
+```bash
+cp agents/redacteur_outreach/style_examples/example_default.example.txt \
+   agents/redacteur_outreach/style_examples/example_default.txt
+# Editez example_default.txt avec vos vraies coordonnees si besoin
+```
+
+Si `example_default.txt` est absent, l'agent fonctionne sans exemple de style
+(le brouillon template est reecrit sans contrainte de ton particulier).
+
+**Garantie securite** : le garde-fou `link_injection` dans `llm_rewriter.py`
+empeche toute URL, email ou numero de telephone present dans cet exemple de
+fuiter dans les emails generes. Seuls les liens explicitement presents dans
+`pitch.json` ou le `body_fallback` sont autorises en sortie LLM.
+
 ## Configuration pitch
 
 Le fichier `agents/redacteur_outreach/pitch.json` contient les informations
@@ -190,7 +216,7 @@ ASCII uniquement. Les sauts de ligne dans `signature` s expriment via `\n`.
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "editeur_nom": "EverTrack",
   "pitch_court": "EverTrack securise la tracabilite produit ...",
   "valeur_immediate": "Identifier les lots affectes en quelques minutes ...",
@@ -251,11 +277,19 @@ Trois situations declenchent le fallback vers `body_fallback` :
 | Flag `--no-llm` | `no_llm_requested` | `brouillon` |
 | Exception API (timeout, rate limit) | `api_error` | `a_valider` |
 | Chiffre invente detecte (regex) | `hallucination_detected` | `a_valider` |
+| URL / email / telephone non autorise detecte | `link_injection` | `a_valider` |
 | Caractere non-ASCII en sortie LLM | `non_ascii_detected` | `a_valider` |
 
 La detection d hallucination compare les tokens numeriques (suite de 2+ chiffres)
-presents dans la reponse LLM avec ceux du `body_fallback` + contexte + pitch. Tout
-chiffre absent de ces sources est considere comme invente.
+presents dans la reponse LLM avec ceux du `body_fallback` + sous-set restreint du
+contexte (marque, dates, score_total, raison_sociale, contact_nom) + pitch. Les
+champs `siren`, `siret`, `email` et `telephone` sont exclus du set autorise pour
+eviter qu ils apparaissent dans le corps genere.
+
+Le garde-fou `link_injection` verifie que toute URL, adresse email et numero de
+telephone presents dans la sortie LLM figuraient deja dans `pitch.json` ou le
+`body_fallback`. Il cible specifiquement la fuite de coordonnees depuis l exemple
+stylistique (`style_examples/example_default.txt`).
 
 Les statuts `a_valider` pour anomalie (3 derniers cas) signalent qu un humain doit
 inspecter avant usage -- le `body_fallback` est toujours disponible en colonne
@@ -278,10 +312,11 @@ Depuis `agents/` :
 python -m unittest discover redacteur_outreach/tests -v
 ```
 
-Couverture : storage (CRUD + migrations), context_builder (fixtures SQLite
-temporaires), template_renderer (3 scenarios), llm_rewriter (MagicMock --
-succes / sans cle / exception / hallucination), orchestrateur (MagicMock modules),
-CLI (patch sys.argv).
+204 tests. Couverture : storage (CRUD + migrations), context_builder (fixtures
+SQLite temporaires), template_renderer (3 scenarios), llm_rewriter (MagicMock --
+succes / sans cle / exception / hallucination / link_injection), style_loader
+(cache / fichier absent / troncature), backward_compat (messages v1.0 existants),
+orchestrateur (MagicMock modules), CLI (patch sys.argv).
 
 ## Hors scope V1
 

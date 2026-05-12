@@ -265,9 +265,11 @@ car Claude Code et certains tools injectent des vars vides dans l'env shell.
 ```
 dashboard_reflex/dashboard_reflex/
 ├── dashboard_reflex.py    # index() + routing rx.match + mobile bottom nav
-├── state.py               # DashboardState (vars + event handlers)
+├── state.py               # DashboardState (vars + event handlers + @rx.var KPI outreach)
 ├── services/
-│   └── data.py            # Lecture des 4 SQLite + get_matches pour cross-ref
+│   ├── data.py            # Lecture des 4 SQLite + get_matches + build_outreach_kpi
+│   ├── normalize.py       # Couche pure (sans Reflex) — normalize_outreach_pure
+│   └── tests/             # Tests unitaires services (78 tests)
 ├── components/
 │   ├── sidebar.py         # Navigation desktop (cachée <640px)
 │   ├── header.py          # Breadcrumb + toast + Rafraîchir
@@ -278,6 +280,7 @@ dashboard_reflex/dashboard_reflex/
 │   ├── prospect_detail_drawer.py
 │   ├── signaux_table.py   # Avec KPI lead time
 │   ├── signal_detail_drawer.py
+│   ├── outreach_drawer.py # Drawer 720px + section INSIGHTS (3 KPI graphiques)
 │   └── tier_badge.py
 └── assets/
 ```
@@ -299,6 +302,9 @@ avec le Python système utilisé pour les agents.
 
 ### Pièges courants
 
+- **Drawer outreach élargi 720px** : même pattern `left="auto"` que les autres
+  drawers. `max_width="95vw"` pour mobile. La section INSIGHTS utilise
+  `rx.recharts` avec `height` en pixels (pas `100%`) — nécessaire dans vaul.
 - **Drawer à gauche au lieu de droite** : `rx.drawer.content` doit avoir
   `position="fixed"`, `right="0"`, `bottom="0"`, **`left="auto"`** (vaul injecte
   `left:0` par défaut qui gagne sur `right:0`).
@@ -387,17 +393,20 @@ Utile pour tester sur mobile ou envoyer un lien au client.
   matches confirmés remontent en tête et survivent aux recomputes (`clear_matches(keep_confirmed=True)`)
 - **Table** : `signal_incident_matches` (PRIMARY KEY composite signal_id + incident_source + incident_source_id)
 
-### Agent 5 — Rédaction outreach
+### Agent 5 — Rédaction outreach (v1.1)
 - **Approche hybride** : `string.Template` produit un brouillon factuel, Claude Haiku le réécrit pour le style (paramétrable via `--no-llm`).
 - **Fallback déterministe** : sans `ANTHROPIC_API_KEY`, le template seul est livré. Statut résultant : `brouillon`. Avec LLM OK : `a_valider`.
-- **Garde-fous hallucination** :
-  - Set de tokens numériques autorisés = `context` + `body_fallback` + `pitch`. Tout chiffre supplémentaire en sortie LLM → fallback (`reason="hallucination_detected"`).
+- **Exemple stylistique** : `style_loader.py` charge `style_examples/example_default.txt` (UTF-8 → ASCII normalisé, max 2000 chars, cache module-level). Injecté dans le system prompt du LLM sous balise `<STYLE_EXAMPLE>`. Si absent : agent fonctionnel sans exemple de ton. Le fichier réel est gitignoré ; template anonymisé `example_default.example.txt` versionné.
+- **Garde-fous** :
+  - Set de tokens numériques restreint (marque, dates, score_total, raison_sociale, contact_nom) — `siren`, `siret`, `email`, `telephone` exclus. Tout chiffre hors set → fallback (`reason="hallucination_detected"`).
+  - URL / email / téléphone en sortie LLM absents du `pitch.json` et du `body_fallback` → fallback (`reason="link_injection"`). Vise la fuite de coordonnées depuis l'exemple stylistique.
   - Sortie non-ASCII → fallback (`reason="non_ascii_detected"`) — cp1252 Windows.
 - **AUCUN envoi automatique** : le statut `envoye` est manuel uniquement. L'utilisateur copie le body via le bouton Copier du drawer dashboard.
 - **Idempotence** : `Redacteur.generate(source, source_id)` retourne l'existant. `--force` force la régénération. `message_id = sha1(source|source_id)[:16]`.
 - **Sources de données** : agrège `incidents` + `scores` + `enrichissements` + `signaux` (via `context_builder.build_context`). `context_json` figé en DB pour audit.
-- **Config pitch** : `pitch.json` (stdlib `json`, multi-ligne via `\n`). Clés : `editeur_nom`, `pitch_court`, `valeur_immediate`, `cta`, `signature`, `opt_out_placeholder` (RGPD réservé).
+- **Config pitch** : `pitch.json` v1.1 (stdlib `json`, multi-ligne via `\n`). Clés : `editeur_nom`, `pitch_court`, `valeur_immediate`, `cta`, `signature`, `opt_out_placeholder` (RGPD réservé).
 - **Workflow** : `brouillon` → `a_valider` → `valide` → `envoye` (et `rejete`). Bouton "Message" dans le drawer Prospect du dashboard ouvre le drawer outreach.
+- **`REDACTEUR_VERSION`** : `"1.1"` depuis ADR-006. Les messages existants (`"1.0"`) ne sont pas touchés ; ils peuvent être régénérés via `regenerate <message_id>`.
 
 ---
 
@@ -408,7 +417,9 @@ Utile pour tester sur mobile ou envoyer un lien au client.
 - Dashboard Reflex 3 pages avec drawers + validation humaine + mobile responsive
 - Cross-référence signal↔incident avec auto-confirm par lien RappelConso
 - Tunnel Cloudflare pour accès externe
-- Agent 5 (rédacteur outreach) : génération brouillon hybride template+LLM, workflow validation humaine, drawer dashboard
+- Agent 5 (rédacteur outreach v1.1) : génération brouillon hybride template+LLM, injection few-shot exemple stylistique, garde-fous hallucination/link_injection/non_ascii, workflow validation humaine, 204 tests
+- Drawer outreach 720px + section INSIGHTS avec 3 KPI graphiques (score sanitaire, sources médiatiques, confidence prospect)
+- `services/normalize.py` couche pure testable hors venv Reflex
 
 ### À faire
 - **Intégration CRM** : push leads vers Sellsy

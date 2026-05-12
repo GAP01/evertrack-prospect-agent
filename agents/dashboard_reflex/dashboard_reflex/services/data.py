@@ -745,3 +745,132 @@ def count_outreach_by_status() -> dict[str, int]:
         return counts
     except Exception:
         return {}
+
+
+# ── KPI payload outreach (pour le drawer INSIGHTS) ──────────────────────────
+
+# Seuils de score sanitaire pour l'étiquetage (identiques à ceux d'evaluateur_severite)
+_SCORE_TIERS: tuple[tuple[int, str, str], ...] = (
+    (80, "Critique", "red"),
+    (60, "Eleve",    "orange"),
+    (40, "Modere",   "amber"),
+    (0,  "Faible",   "green"),
+)
+
+_KPI_EMPTY: dict[str, Any] = {
+    "score_sanitaire": {
+        "value": 0,
+        "label": "Faible",
+        "color": "green",
+    },
+    "sources_media": {
+        "total": 0,
+        "by_source": [],
+    },
+    "confidence_prospect": {
+        "value": 0.0,
+        "percent": 0,
+        "status": "",
+    },
+}
+
+
+def _score_label_color(value: int) -> tuple[str, str]:
+    """Retourne (label, color) pour un score sanitaire 0-100."""
+    for threshold, label, color in _SCORE_TIERS:
+        if value >= threshold:
+            return label, color
+    return "Faible", "green"
+
+
+def build_outreach_kpi(context_json_str: Optional[str]) -> dict[str, Any]:
+    """
+    Parse le context_json d'un message outreach et retourne le payload KPI
+    consommable par le drawer INSIGHTS.
+
+    Le context_json est produit par redacteur_outreach.context_builder.build_context()
+    et contient les clés : "incident", "score", "enrichissement", "signaux_summary".
+
+    Retour garanti sans exception : si context_json est None, vide, malformé
+    ou depasse 64 Ko, un payload "vide" cohérent est renvoyé.
+
+    Cap 64 Ko : un context_json legitime ne depasse jamais quelques Ko. Une
+    taille anormale signale soit une corruption soit une tentative d'injection
+    de contenu volumineux. On retourne le payload vide plutot que de parser.
+    """
+    import json as _json
+
+    if not context_json_str:
+        import copy
+        return copy.deepcopy(_KPI_EMPTY)
+
+    if len(context_json_str) > 65536:  # 64 KB cap
+        import copy
+        return copy.deepcopy(_KPI_EMPTY)
+
+    try:
+        ctx = _json.loads(context_json_str)
+    except (ValueError, TypeError):
+        import copy
+        return copy.deepcopy(_KPI_EMPTY)
+
+    if not isinstance(ctx, dict):
+        import copy
+        return copy.deepcopy(_KPI_EMPTY)
+
+    # --- score_sanitaire ---
+    # context_builder._fetch_score renomme "score" → "score_total"
+    score_block = ctx.get("score") or {}
+    raw_score = score_block.get("score_total") if isinstance(score_block, dict) else None
+    try:
+        score_value = max(0, min(100, int(float(raw_score)))) if raw_score is not None else 0
+    except (TypeError, ValueError):
+        score_value = 0
+    label, color = _score_label_color(score_value)
+
+    # --- sources_media ---
+    # signaux_summary est une liste de dicts avec "source_name"
+    signaux_summary = ctx.get("signaux_summary") or []
+    source_counts: dict[str, int] = {}
+    if isinstance(signaux_summary, list):
+        for sig in signaux_summary:
+            if not isinstance(sig, dict):
+                continue
+            src = str(sig.get("source_name") or "").strip()
+            if src:
+                source_counts[src] = source_counts.get(src, 0) + 1
+    by_source = sorted(
+        [{"source": src, "count": cnt} for src, cnt in source_counts.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
+
+    # --- confidence_prospect ---
+    enrich = ctx.get("enrichissement") or {}
+    if isinstance(enrich, dict):
+        raw_conf = enrich.get("confidence")
+        try:
+            conf_value = max(0.0, min(1.0, float(raw_conf))) if raw_conf is not None else 0.0
+        except (TypeError, ValueError):
+            conf_value = 0.0
+        contact_status = str(enrich.get("contact_type") or enrich.get("match_status") or "")
+    else:
+        conf_value = 0.0
+        contact_status = ""
+
+    return {
+        "score_sanitaire": {
+            "value": score_value,
+            "label": label,
+            "color": color,
+        },
+        "sources_media": {
+            "total": sum(source_counts.values()),
+            "by_source": by_source,
+        },
+        "confidence_prospect": {
+            "value": conf_value,
+            "percent": round(conf_value * 100),
+            "status": contact_status,
+        },
+    }

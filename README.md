@@ -55,7 +55,8 @@ enrichissements.sqlite         │
 | **evaluateur_severite** | Score sanitaire 0–100 via Claude Haiku (fallback règles) | `incidents.sqlite` | `scores.sqlite` |
 | **enrichisseur_prospects** | Match marque → SIRENE + Pappers, ciblage qualité/supply chain | `incidents.sqlite` | `enrichissements.sqlite` |
 | **detecteur_signaux** | Signaux faibles Google News + Reddit, cross-ref avec incidents | RSS + JSON publics | `signaux.sqlite` |
-| **dashboard_reflex** | SPA Reflex (3 pages) avec validation humaine | Les 4 SQLite | UI web |
+| **redacteur_outreach** | Génération brouillons email hybride template+LLM, workflow validation | Les 4 SQLite | `outreach.sqlite` |
+| **dashboard_reflex** | SPA Reflex (3 pages + drawer outreach) avec validation humaine | Les 5 SQLite | UI web |
 
 ## Stack
 
@@ -82,6 +83,7 @@ python -m venv .venv
 .venv/Scripts/pip install -r evaluateur_severite/requirements.txt
 .venv/Scripts/pip install -r enrichisseur_prospects/requirements.txt
 .venv/Scripts/pip install -r detecteur_signaux/requirements.txt
+.venv/Scripts/pip install -r redacteur_outreach/requirements.txt
 ```
 
 Créer `agents/.env` :
@@ -107,6 +109,9 @@ python -m enrichisseur_prospects.cli enrich
 
 # 4. Détecter les signaux faibles
 python -m detecteur_signaux.cli fetch --max 100
+
+# 5. Générer les brouillons outreach (incidents enrichis, score >= 60)
+python -m redacteur_outreach.cli generate-batch --min-score 60
 ```
 
 ### Dashboard
@@ -134,6 +139,8 @@ python -m unittest discover
 - **Cross-référence signal ↔ incident** : 4 dimensions pondérées (marque 40 %, symptôme 30 %, produit 20 %, proximité date 10 %). Auto-confirmation quand l'article contient un lien direct `rappel.conso.gouv.fr/fiche-rappel/...`.
 - **Targeting contacts opérationnels** : profils qualité / QHSE / supply chain / conformité priorisés sur les dirigeants légaux (fallback uniquement).
 - **Dédup signaux** : `sha1(marque + symptome + jour)[:16]` pour stabilité.
+- **Style few-shot outreach** : injection d'un exemple stylistique optionnel dans le prompt LLM sans polluer le set de tokens autorisés ([ADR-006](docs/adr/ADR-006-enrichissement-outreach-drawer-kpi.md)).
+- **Garde-fous outreach** : `hallucination_detected` (chiffres inventés), `link_injection` (URLs/emails/téléphones hors whitelist), `non_ascii_detected` — chaque anomalie déclenche le fallback déterministe.
 
 ## Structure du dépôt
 
@@ -143,6 +150,7 @@ agents/
 ├── evaluateur_severite/     # Agent 2
 ├── enrichisseur_prospects/  # Agent 3
 ├── detecteur_signaux/       # Agent 4
+├── redacteur_outreach/      # Agent 5
 ├── dashboard/               # Data access (lecture seule SQLite)
 ├── dashboard_reflex/        # SPA Reflex
 └── data/                    # SQLite (gitignored)
@@ -155,9 +163,10 @@ Chaque agent suit le même pattern : `models.py` (dataclasses), `storage.py` (SQ
 | Composant | État |
 |---|---|
 | Agents 1–4 | Livrés, testés |
+| Agent 5 — Rédaction outreach (v1.1) | Livré (style few-shot, garde-fous link_injection + hallucination, 204 tests) |
 | Dashboard Reflex | Livré (3 pages, drawers, validation, mobile) |
+| Drawer outreach 720 px + KPI INSIGHTS | Livré (score sanitaire, sources médiatiques, confidence prospect) |
 | Cross-ref signal↔incident | Livré (auto-confirm par lien) |
-| Agent 5 — Rédaction outreach | À faire |
 | Intégration CRM (Sellsy) | À faire |
 
 ## Licence

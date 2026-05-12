@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-REDACTEUR_VERSION = "1.0"
+REDACTEUR_VERSION = "1.1"
 
 # Statuts du cycle de vie d'un message outreach
 STATUS_CHOICES = ("brouillon", "a_valider", "valide", "envoye", "rejete")
