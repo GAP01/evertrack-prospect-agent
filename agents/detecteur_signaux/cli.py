@@ -2,7 +2,7 @@
 CLI du détecteur de signaux faibles.
 
 Usage :
-    python -m detecteur_signaux.cli fetch [--max N] [--no-llm] [--sources google_news,reddit]
+    python -m detecteur_signaux.cli fetch [--max N] [--no-llm] [--sources google_news,reddit,tiktok]
     python -m detecteur_signaux.cli show <signal_id>
     python -m detecteur_signaux.cli list [--status a_valider] [--min-score 60]
     python -m detecteur_signaux.cli stats
@@ -260,7 +260,7 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--no-llm", action="store_true", help="Fallback regex (sans Claude)")
     f.add_argument(
         "--sources", default="google_news,reddit",
-        help="Liste CSV des sources à interroger",
+        help="Liste CSV des sources a interroger (ex: google_news, reddit, tiktok, signalconso)",
     )
     f.add_argument(
         "--no-crossref", action="store_true",

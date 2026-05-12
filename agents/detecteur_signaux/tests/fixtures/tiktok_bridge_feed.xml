@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>TikTok #rappelconso</title>
+  <link href="https://www.tiktok.com/tag/rappelconso"/>
+  <updated>2026-05-01T12:00:00Z</updated>
+
+  <entry>
+    <title>Alerte salmonelle dans le jambon X</title>
+    <link href="https://www.tiktok.com/@user_alpha/video/7234567890"/>
+    <published>2026-05-01T10:00:00Z</published>
+    <updated>2026-05-01T10:00:00Z</updated>
+    <summary>Rappel urgent : lot de jambon blanc contamination salmonelle detectee en grande distribution.</summary>
+    <author>
+      <name>user_alpha</name>
+    </author>
+  </entry>
+
+  <entry>
+    <title>Rappel produit listeria fromage</title>
+    <link href="https://www.tiktok.com/@user_beta/video/7234567891"/>
+    <published>2026-05-01T11:00:00Z</published>
+    <updated>2026-05-01T11:00:00Z</updated>
+    <summary>Attention listeria monocytogenes detectee dans lot fromage. Retrait en cours.</summary>
+    <author>
+      <name>user_beta</name>
+    </author>
+  </entry>
+
+</feed>
