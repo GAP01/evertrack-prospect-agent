@@ -52,6 +52,14 @@ class TestExtractTar(unittest.TestCase):
             with self.assertRaises(ValueError):
                 fetch_snapshot.extract_tar_bytes(data, Path(d))
 
+    def test_rejects_sibling_prefix_escape(self):
+        data = _make_tar_bytes({"../scores_evil/x.sqlite": b"nope"})
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / "scores"
+            target.mkdir()
+            with self.assertRaises(ValueError):
+                fetch_snapshot.extract_tar_bytes(data, target)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -41,7 +41,7 @@ def extract_tar_bytes(data: bytes, dest: Path) -> None:
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         for member in tar.getmembers():
             member_path = (dest / member.name).resolve()
-            if not str(member_path).startswith(str(dest_resolved)):
+            if not member_path.is_relative_to(dest_resolved):
                 raise ValueError(f"Path traversal refuse: {member.name}")
         tar.extractall(dest, filter="data")
 
