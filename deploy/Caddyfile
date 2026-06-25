@@ -10,13 +10,25 @@
 		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
 	}
 
-	# Routes backend Reflex (WebSocket d'evenements, healthcheck, upload)
-	@backend path /_event* /ping* /_upload*
-	reverse_proxy @backend localhost:8000
+	# Routes backend Reflex (WebSocket d'evenements, healthcheck, upload).
+	# Blocs handle dedies : sans ca, le try_files du frontend (ordre par defaut
+	# de Caddy) reecrit /_event vers /index.html AVANT le reverse_proxy, et le
+	# WebSocket n'atteint jamais le backend (dashboard sans donnees).
+	handle /_event* {
+		reverse_proxy localhost:8000
+	}
+	handle /ping* {
+		reverse_proxy localhost:8000
+	}
+	handle /_upload* {
+		reverse_proxy localhost:8000
+	}
 
-	# Frontend statique exporte par Reflex (React Router 7)
-	# Chemin reel apres `reflex export` dans agents/dashboard_reflex/
-	root * /app/agents/dashboard_reflex/.web/build/client
-	try_files {path} /index.html
-	file_server
+	# Frontend statique exporte par Reflex (React Router 7) + fallback SPA.
+	# Chemin reel apres `reflex export` dans agents/dashboard_reflex/.
+	handle {
+		root * /app/agents/dashboard_reflex/.web/build/client
+		try_files {path} /index.html
+		file_server
+	}
 }
