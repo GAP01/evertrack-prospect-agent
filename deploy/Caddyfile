@@ -15,7 +15,8 @@
 	reverse_proxy @backend localhost:8000
 
 	# Frontend statique exporte par Reflex (React Router 7)
-	root * /app/.web/build/client
+	# Chemin reel apres `reflex export` dans agents/dashboard_reflex/
+	root * /app/agents/dashboard_reflex/.web/build/client
 	try_files {path} /index.html
 	file_server
 }
