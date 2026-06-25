@@ -1,0 +1,22 @@
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT} {
+	encode gzip
+
+	basic_auth {
+		{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+	}
+
+	# Routes backend Reflex (WebSocket d'evenements, healthcheck, upload)
+	@backend path /_event* /ping* /_upload*
+	reverse_proxy @backend localhost:8000
+
+	# Frontend statique exporte par Reflex (React Router 7)
+	# Chemin reel apres `reflex export` dans agents/dashboard_reflex/
+	root * /app/agents/dashboard_reflex/.web/build/client
+	try_files {path} /index.html
+	file_server
+}

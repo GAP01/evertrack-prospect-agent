@@ -1,0 +1,40 @@
+# Secrets — never bake into the image (independent from .gitignore)
+**/.env
+**/*.env
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Venvs and build artefacts
+**/.venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Reflex generated frontend (rebuilt in Docker)
+**/.web
+
+# Local data (injected at runtime from snapshot)
+agents/data/*.sqlite
+agents/data/*.json
+
+# Git and tooling
+.git
+.claude
+**/.DS_Store
+
+# Log files
+agents/*.log
+agents/dashboard_reflex/*.log
+
+# Docs and presentation
+docs/
+presentation/
+*.docx
+
+# Other
+veille_spike.html
+install_cloudflared.ps1
+RECAP_SESSION_2026-04-22.md
