@@ -446,6 +446,16 @@ Utile pour tester sur mobile ou envoyer un lien au client.
 - **Pappers 401** : vérifier plan/activation de la clé
 - **Déploiement continu** : serveur dédié (actuellement local + cloudflared)
 - **Calibration continue** des poids scoring (SOURCE_WEIGHTS, seuils, etc.)
+- **Étendre `TIKTOK_BRIDGE_USERS`** (`agents/detecteur_signaux/keywords.py`) :
+  ajouter d'autres comptes FR à forte valeur (DGCCRF, ANSES, UFC-Que Choisir,
+  Ministère Économie, etc.) après vérification que chaque handle existe
+  vraiment sur TikTok. Actuellement seul `@60millions` est configuré.
+- **Brancher de nouvelles sources via RSS-Bridge** (même pattern que TikTok user) :
+  RSS-Bridge supporte ~100 bridges — candidats utiles pour EverTrack :
+  Reddit (alternative au scraping JSON actuel), X/Twitter (comptes presse conso),
+  Instagram (comptes officiels), YouTube (chaînes santé/conso), Facebook (pages
+  publiques DGCCRF). Réutiliser le helper `fetch_via_bridge_user` et la
+  validation SSRF déjà en place dans `agents/detecteur_signaux/sources/tiktok.py`.
 
 ---
 
