@@ -19,7 +19,7 @@ jobs:
       - name: Install agent dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests python-dateutil anthropic feedparser googlenewsdecoder
+          pip install requests python-dateutil anthropic feedparser googlenewsdecoder pytest
 
       # The real style example is gitignored (contains client-specific content).
       # A CI stub with the minimal content required by test_style_loader.py is
