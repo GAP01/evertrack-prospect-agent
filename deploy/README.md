@@ -20,22 +20,31 @@ GitHub Release privé vers `/data`, puis lance le backend.
 
 1. **PAT GitHub** : créer un token fine-grained, repo `GAP01/evertrack-prospect-agent`,
    permission **Contents: Read-only**. Copier la valeur (commence par `github_pat_...`).
-2. **Hash du mot de passe démo** (bcrypt) :
+2. **Hash du mot de passe démo, en base64** (bcrypt encodé base64). On encode en
+   base64 car le hash bcrypt contient des `$` que Railway interprète comme des
+   références de variables et corrompt (erreur Caddy `base64-decoding password`).
    ```
-   docker run --rm caddy:2 caddy hash-password --plaintext <motdepasse>
+   HASH=$(docker run --rm caddy:2 caddy hash-password --plaintext <motdepasse>)
+   printf '%s' "$HASH" | base64 -w0
    ```
-   Copier le hash produit.
+   Copier la chaîne base64 produite (uniquement des lettres/chiffres, aucun `$`).
 3. **Railway** :
    - New Project -> Deploy from GitHub repo -> `evertrack-prospect-agent`.
+     (Sélectionner la branche `feat/deployment-railway` tant que la PR n'est pas
+     mergée ; après merge, `main` convient.)
    - Railway détecte `railway.json` et build via `deploy/Dockerfile`.
    - Onglet **Variables**, ajouter :
      | Variable | Valeur |
      |---|---|
      | `BASIC_AUTH_USER` | `demo` (ou autre) |
-     | `BASIC_AUTH_HASH` | le hash bcrypt de l'étape 2 |
+     | `BASIC_AUTH_HASH_B64` | la chaîne base64 de l'étape 2 |
      | `GITHUB_REPO` | `GAP01/evertrack-prospect-agent` |
      | `GITHUB_SNAPSHOT_TOKEN` | le PAT de l'étape 1 |
      | `EVERTRACK_DATA_DIR` | `/data` |
+
+     > L'entrypoint décode `BASIC_AUTH_HASH_B64` vers `BASIC_AUTH_HASH` au
+     > démarrage. On peut aussi fournir directement `BASIC_AUTH_HASH` (hash brut),
+     > mais sur Railway les `$` du hash sont corrompus — préférer la version base64.
    - Onglet **Settings -> Networking** : générer un domaine public. Noter l'URL
      `https://<service>.up.railway.app`.
    - Ajouter la variable `API_URL` = cette URL publique HTTPS.
