@@ -56,10 +56,18 @@ def top_incidents(
     limit: int = 50,
     tier: Optional[str] = None,
     sous_categorie: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """
     Renvoie le top N (incidents joints a leur score le plus recent),
     classe par score DESC.
+
+    Les filtres `sous_categorie`, `search` (marque OU motif, sous-chaine
+    case-insensitive) et `date_from`/`date_to` (sur date_publication, ISO
+    YYYY-MM-DD) s'appliquent cote Python apres jointure, car les colonnes
+    incident vivent dans une base distincte de la base scores.
     """
     conn_sc = _connect_ro(scores_db)
     if conn_sc is None:
@@ -78,13 +86,20 @@ def top_incidents(
         sql += " WHERE s.tier = ?"
         params.append(tier)
     sql += " ORDER BY s.score DESC LIMIT ?"
-    params.append(limit * 2)  # marge pour filtrage sous_categorie cote python
+    # Quand un filtre cote Python est actif, on elargit le pool de candidats :
+    # `limit*2` est trop serre des qu'on filtre par texte/date. Volumetrie
+    # faible a notre echelle (cf. CLAUDE.md), donc on peut surdimensionner.
+    py_filter_active = bool(sous_categorie or search or date_from or date_to)
+    fetch_bound = max(limit * 2, 2000) if py_filter_active else limit * 2
+    params.append(fetch_bound)
 
     score_rows = [dict(r) for r in conn_sc.execute(sql, params).fetchall()]
     conn_sc.close()
 
     if not score_rows:
         return []
+
+    search_term = search.lower().strip() if search else None
 
     # Joindre avec les metadonnees incident
     conn_inc = _connect_ro(incidents_db)
@@ -100,6 +115,19 @@ def top_incidents(
             continue
         meta = dict(meta)
         if sous_categorie and sous_categorie.lower() not in (meta.get("sous_categorie") or "").lower():
+            continue
+        if search_term:
+            haystack = (
+                (meta.get("marque") or "").lower()
+                + " "
+                + (meta.get("motif") or "").lower()
+            )
+            if search_term not in haystack:
+                continue
+        date_pub = (meta.get("date_publication") or "")[:10]
+        if date_from and (not date_pub or date_pub < date_from):
+            continue
+        if date_to and (not date_pub or date_pub > date_to):
             continue
         sr["incident"] = meta
         sr["dimensions"] = json.loads(sr.pop("dimensions_json"))

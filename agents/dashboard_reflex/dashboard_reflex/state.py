@@ -288,6 +288,9 @@ class DashboardState(rx.State):
 
     tier_filter: str = "all"
     sous_cat_filter: str = "all"
+    incident_search: str = ""
+    incident_date_from: str = ""
+    incident_date_to: str = ""
     limit: int = 25
 
     drawer_open: bool = False
@@ -300,6 +303,7 @@ class DashboardState(rx.State):
     enrich_rows: list[dict[str, Any]] = []
     enrich_stats: dict[str, Any] = {}
     enrich_match_filter: str = "all"
+    enrich_search: str = ""
     enrich_limit: int = 100
 
     prospect_drawer_open: bool = False
@@ -309,6 +313,9 @@ class DashboardState(rx.State):
     signal_rows: list[dict[str, Any]] = []
     signal_stats: dict[str, Any] = {}
     signal_status_filter: str = "all"
+    signal_search: str = ""
+    signal_date_from: str = ""
+    signal_date_to: str = ""
     signal_limit: int = 100
 
     signal_drawer_open: bool = False
@@ -717,6 +724,7 @@ class DashboardState(rx.State):
         raw = data_service.get_enrichissements(
             limit=self.enrich_limit,
             match_status=status,
+            search=self.enrich_search or None,
         )
         rows = [_normalize_enrich_row(r) for r in raw]
         if self.prospect_sort_column:
@@ -727,11 +735,20 @@ class DashboardState(rx.State):
         self.enrich_match_filter = value
         self._load_enrichissements()
 
+    def set_enrich_search(self, value: str):
+        self.enrich_search = value
+        self._load_enrichissements()
+
     def set_enrich_limit(self, value: str):
         try:
             self.enrich_limit = max(5, min(500, int(value)))
         except (TypeError, ValueError):
             self.enrich_limit = 100
+        self._load_enrichissements()
+
+    def reset_enrich_filters(self):
+        self.enrich_match_filter = "all"
+        self.enrich_search = ""
         self._load_enrichissements()
 
     def open_prospect(self, source: str, source_id: str):
@@ -872,6 +889,9 @@ class DashboardState(rx.State):
         raw = data_service.get_signaux(
             limit=self.signal_limit,
             status=status,
+            search=self.signal_search or None,
+            date_from=self.signal_date_from or None,
+            date_to=self.signal_date_to or None,
         )
         rows = [_normalize_signal_row(r) for r in raw]
         if self.signal_sort_column:
@@ -882,11 +902,30 @@ class DashboardState(rx.State):
         self.signal_status_filter = value
         self._load_signaux()
 
+    def set_signal_search(self, value: str):
+        self.signal_search = value
+        self._load_signaux()
+
+    def set_signal_date_from(self, value: str):
+        self.signal_date_from = value
+        self._load_signaux()
+
+    def set_signal_date_to(self, value: str):
+        self.signal_date_to = value
+        self._load_signaux()
+
     def set_signal_limit(self, value: str):
         try:
             self.signal_limit = max(5, min(500, int(value)))
         except (TypeError, ValueError):
             self.signal_limit = 100
+        self._load_signaux()
+
+    def reset_signal_filters(self):
+        self.signal_status_filter = "all"
+        self.signal_search = ""
+        self.signal_date_from = ""
+        self.signal_date_to = ""
         self._load_signaux()
 
     def open_signal(self, signal_id: str):
@@ -1061,6 +1100,9 @@ class DashboardState(rx.State):
             limit=self.limit,
             tier=tier,
             sous_categorie=sous_cat,
+            search=self.incident_search or None,
+            date_from=self.incident_date_from or None,
+            date_to=self.incident_date_to or None,
         )
         flat: list[dict[str, Any]] = []
         for r in raw:
@@ -1134,11 +1176,31 @@ class DashboardState(rx.State):
         self.sous_cat_filter = value
         self._refresh()
 
+    def set_incident_search(self, value: str):
+        self.incident_search = value
+        self._refresh()
+
+    def set_incident_date_from(self, value: str):
+        self.incident_date_from = value
+        self._refresh()
+
+    def set_incident_date_to(self, value: str):
+        self.incident_date_to = value
+        self._refresh()
+
     def set_limit(self, value: str):
         try:
             self.limit = max(5, min(200, int(value)))
         except (TypeError, ValueError):
             self.limit = 25
+        self._refresh()
+
+    def reset_incident_filters(self):
+        self.tier_filter = "all"
+        self.sous_cat_filter = "all"
+        self.incident_search = ""
+        self.incident_date_from = ""
+        self.incident_date_to = ""
         self._refresh()
 
     def refresh(self):

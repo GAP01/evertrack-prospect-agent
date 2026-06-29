@@ -23,6 +23,7 @@ agents/data/*.json
 # Reflex (auto-généré)
 .web/
 .states/
+reflex.lock/
 
 # Logs
 *.log

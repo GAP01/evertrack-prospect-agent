@@ -46,9 +46,13 @@ def get_top(
     limit: int = 50,
     tier: Optional[str] = None,
     sous_categorie: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     return data_access.top_incidents(
         INCIDENTS_DB, SCORES_DB, limit=limit, tier=tier, sous_categorie=sous_categorie,
+        search=search, date_from=date_from, date_to=date_to,
     )
 
 
@@ -92,8 +96,13 @@ def _enrich_connect() -> Optional[sqlite3.Connection]:
 def get_enrichissements(
     limit: int = 100,
     match_status: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> list[dict[str, Any]]:
-    """Lit les enrichissements depuis enrichissements.sqlite, triés par confidence desc."""
+    """Lit les enrichissements depuis enrichissements.sqlite, triés par confidence desc.
+
+    `search` filtre en sous-chaine case-insensitive sur marque_input OU
+    raison_sociale OU contact_nom.
+    """
     conn = _enrich_connect()
     if conn is None:
         return []
@@ -102,6 +111,14 @@ def get_enrichissements(
     if match_status:
         sql += " AND match_status = ?"
         params.append(match_status)
+    term = (search or "").strip().lower()
+    if term:
+        like = f"%{term}%"
+        sql += (
+            " AND (LOWER(marque_input) LIKE ? OR LOWER(raison_sociale) LIKE ?"
+            " OR LOWER(contact_nom) LIKE ?)"
+        )
+        params.extend([like, like, like])
     sql += " ORDER BY confidence DESC, enriched_at DESC LIMIT ?"
     params.append(limit)
     rows = conn.execute(sql, params).fetchall()
@@ -163,11 +180,17 @@ def get_signaux(
     limit: int = 100,
     status: Optional[str] = None,
     min_score: Optional[int] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     """Lit les signaux depuis signaux.sqlite avec leur nombre de sources.
 
     Tri : récurrence desc (signaux relayés par plusieurs articles en 1er),
     puis date de publication desc, puis score desc en tie-breaker.
+
+    `search` filtre en sous-chaine case-insensitive sur marque OU symptome
+    OU titre. `date_from`/`date_to` bornent detected_at (ISO YYYY-MM-DD).
     """
     conn = _signaux_connect()
     if conn is None:
@@ -190,6 +213,20 @@ def get_signaux(
     if min_score is not None:
         sql += " AND s.score >= ?"
         params.append(min_score)
+    term = (search or "").strip().lower()
+    if term:
+        like = f"%{term}%"
+        sql += (
+            " AND (LOWER(s.marque) LIKE ? OR LOWER(s.symptome) LIKE ?"
+            " OR LOWER(s.titre) LIKE ?)"
+        )
+        params.extend([like, like, like])
+    if date_from:
+        sql += " AND substr(s.detected_at, 1, 10) >= ?"
+        params.append(date_from)
+    if date_to:
+        sql += " AND substr(s.detected_at, 1, 10) <= ?"
+        params.append(date_to)
     # Tri : récurrence desc en premier, puis fraîcheur, puis score
     sql += " ORDER BY n_sources DESC, s.detected_at DESC, s.score DESC LIMIT ?"
     params.append(limit)

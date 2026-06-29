@@ -119,6 +119,21 @@ def _confidence_bar(confidence: rx.Var[float]) -> rx.Component:
 def _prospects_filters() -> rx.Component:
     return rx.box(
         rx.vstack(
+            rx.text("Recherche", size="1", color="#6b7280", weight="medium"),
+            rx.debounce_input(
+                rx.input(
+                    value=DashboardState.enrich_search,
+                    on_change=DashboardState.set_enrich_search,
+                    placeholder="Marque, entreprise ou contact...",
+                    size="2",
+                    width="240px",
+                ),
+                debounce_timeout=300,
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
             rx.text("Statut match", size="1", color="#6b7280", weight="medium"),
             rx.select(
                 DashboardState.enrich_match_options,
@@ -138,6 +153,19 @@ def _prospects_filters() -> rx.Component:
                 type="number",
                 size="2",
                 width="100px",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
+            rx.text(" ", size="1"),
+            rx.button(
+                rx.icon("x", size=14),
+                "Reinitialiser",
+                on_click=DashboardState.reset_enrich_filters,
+                variant="soft",
+                color_scheme="gray",
+                size="2",
             ),
             spacing="1",
             align="start",

@@ -34,8 +34,55 @@ def _filter_select(
     )
 
 
+def _search_field(
+    label: str,
+    value: rx.Var[str],
+    on_change,
+    placeholder: str,
+    width: str = "220px",
+) -> rx.Component:
+    """Champ de recherche texte avec debounce (evite un refetch par frappe)."""
+    return rx.vstack(
+        rx.text(label, size="1", color="#6b7280", weight="medium"),
+        rx.debounce_input(
+            rx.input(
+                value=value,
+                on_change=on_change,
+                placeholder=placeholder,
+                size="2",
+                width=width,
+            ),
+            debounce_timeout=300,
+        ),
+        spacing="1",
+        align="start",
+    )
+
+
+def _date_field(label: str, value: rx.Var[str], on_change) -> rx.Component:
+    """Champ date (type=date) pour borner une plage."""
+    return rx.vstack(
+        rx.text(label, size="1", color="#6b7280", weight="medium"),
+        rx.input(
+            value=value,
+            on_change=on_change,
+            type="date",
+            size="2",
+            width="150px",
+        ),
+        spacing="1",
+        align="start",
+    )
+
+
 def _filters_row() -> rx.Component:
     return rx.box(
+        _search_field(
+            "Recherche",
+            DashboardState.incident_search,
+            DashboardState.set_incident_search,
+            "Marque ou motif...",
+        ),
         _filter_select(
             "Severite",
             DashboardState.tier_filter,
@@ -48,6 +95,8 @@ def _filters_row() -> rx.Component:
             DashboardState.sous_cat_options,
             DashboardState.set_sous_cat_filter,
         ),
+        _date_field("Du", DashboardState.incident_date_from, DashboardState.set_incident_date_from),
+        _date_field("Au", DashboardState.incident_date_to, DashboardState.set_incident_date_to),
         rx.vstack(
             rx.text("Limite", size="1", color="#6b7280", weight="medium"),
             rx.input(
@@ -56,6 +105,19 @@ def _filters_row() -> rx.Component:
                 type="number",
                 size="2",
                 width="100px",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
+            rx.text(" ", size="1"),
+            rx.button(
+                rx.icon("x", size=14),
+                "Reinitialiser",
+                on_click=DashboardState.reset_incident_filters,
+                variant="soft",
+                color_scheme="gray",
+                size="2",
             ),
             spacing="1",
             align="start",

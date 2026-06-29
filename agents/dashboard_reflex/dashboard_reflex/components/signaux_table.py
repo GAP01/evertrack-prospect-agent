@@ -282,6 +282,21 @@ def _signal_kpi_row() -> rx.Component:
 def _signaux_filters() -> rx.Component:
     return rx.box(
         rx.vstack(
+            rx.text("Recherche", size="1", color="#6b7280", weight="medium"),
+            rx.debounce_input(
+                rx.input(
+                    value=DashboardState.signal_search,
+                    on_change=DashboardState.set_signal_search,
+                    placeholder="Marque, symptome ou titre...",
+                    size="2",
+                    width="220px",
+                ),
+                debounce_timeout=300,
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
             rx.text("Statut", size="1", color="#6b7280", weight="medium"),
             rx.select(
                 DashboardState.signal_status_options,
@@ -294,6 +309,30 @@ def _signaux_filters() -> rx.Component:
             align="start",
         ),
         rx.vstack(
+            rx.text("Du", size="1", color="#6b7280", weight="medium"),
+            rx.input(
+                value=DashboardState.signal_date_from,
+                on_change=DashboardState.set_signal_date_from,
+                type="date",
+                size="2",
+                width="150px",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
+            rx.text("Au", size="1", color="#6b7280", weight="medium"),
+            rx.input(
+                value=DashboardState.signal_date_to,
+                on_change=DashboardState.set_signal_date_to,
+                type="date",
+                size="2",
+                width="150px",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
             rx.text("Limite", size="1", color="#6b7280", weight="medium"),
             rx.input(
                 value=DashboardState.signal_limit.to_string(),
@@ -301,6 +340,19 @@ def _signaux_filters() -> rx.Component:
                 type="number",
                 size="2",
                 width="100px",
+            ),
+            spacing="1",
+            align="start",
+        ),
+        rx.vstack(
+            rx.text(" ", size="1"),
+            rx.button(
+                rx.icon("x", size=14),
+                "Reinitialiser",
+                on_click=DashboardState.reset_signal_filters,
+                variant="soft",
+                color_scheme="gray",
+                size="2",
             ),
             spacing="1",
             align="start",
